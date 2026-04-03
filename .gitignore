@@ -1,0 +1,10 @@
+# Gegenereerde bestanden
+dashboard/dashboard.html
+
+# Python
+__pycache__/
+*.py[cod]
+.env
+
+# macOS
+.DS_Store
