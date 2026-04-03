@@ -236,15 +236,20 @@ if not check_password():
 
 st.markdown("""
 <style>
-  [data-testid="stMetricValue"] { font-size: 2rem !important; font-weight: 800 !important; }
+  @import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap');
+  html, body, [class*="css"] { font-family: 'Open Sans', -apple-system, sans-serif !important; }
+  [data-testid="stMetricValue"] { font-size: 2rem !important; font-weight: 800 !important; color: #2ea3f2 !important; }
   [data-testid="stMetricLabel"] { font-size: 0.75rem !important; text-transform: uppercase; letter-spacing: 0.5px; }
   .status-aan   { color: #276749; background: #c6f6d5; border-radius: 12px; padding: 2px 10px; font-size: 12px; font-weight: 700; }
   .status-uit   { color: #9b2c2c; background: #fed7d7; border-radius: 12px; padding: 2px 10px; font-size: 12px; font-weight: 700; }
   .status-susp  { color: #744210; background: #fefcbf; border-radius: 12px; padding: 2px 10px; font-size: 12px; font-weight: 700; }
   .alert-box    { border-left: 4px solid #e53e3e; background: #fff5f5; padding: 10px 14px; border-radius: 0 8px 8px 0; margin-bottom: 8px; }
   .warn-box     { border-left: 4px solid #dd6b20; background: #fffbeb; padding: 10px 14px; border-radius: 0 8px 8px 0; margin-bottom: 8px; }
-  .info-box     { border-left: 4px solid #3182ce; background: #ebf8ff; padding: 10px 14px; border-radius: 0 8px 8px 0; margin-bottom: 8px; }
+  .info-box     { border-left: 4px solid #2ea3f2; background: #ebf8ff; padding: 10px 14px; border-radius: 0 8px 8px 0; margin-bottom: 8px; }
   div[data-testid="stExpander"] summary { font-weight: 600; }
+  [data-testid="stSidebar"] { background: #f8fafc; }
+  .stButton > button { background: #2ea3f2 !important; color: white !important; border: none !important; font-family: 'Open Sans', sans-serif !important; font-weight: 600 !important; }
+  .stButton > button:hover { background: #1a8fd1 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -255,8 +260,13 @@ df_all = load_data()
 
 # ─── Sidebar filters ───────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## 🖥️ Server Overzicht")
-    st.markdown("**Prinses Maxima Centrum**")
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,#2ea3f2,#1a8fd1);padding:16px 14px;border-radius:10px;margin-bottom:8px">
+      <div style="color:white;font-family:'Open Sans',sans-serif;font-size:22px;font-weight:800;letter-spacing:-0.5px">RAM IT</div>
+      <div style="color:rgba(255,255,255,0.85);font-size:11px;margin-top:2px">Server Overzicht</div>
+    </div>
+    <div style="font-size:12px;color:#555;margin-bottom:4px">📍 Prinses Maxima Centrum</div>
+    """, unsafe_allow_html=True)
     st.caption(f"Data geladen: {NOW.strftime('%d-%m-%Y %H:%M')}")
 
     if st.button("🔄 Data verversen", use_container_width=True):
@@ -310,8 +320,18 @@ if f_search:
 
 
 # ─── Header ───────────────────────────────────────────────────────────────────
-st.markdown("# 🖥️ Server Overzicht – Prinses Maxima Centrum")
-st.caption(f"VMware vCenter rapportage  ·  {len(df)} van {len(df_all)} servers zichtbaar  ·  Gegenereerd {NOW.strftime('%d-%m-%Y %H:%M')}")
+st.markdown(f"""
+<div style="background:linear-gradient(135deg,#2ea3f2 0%,#1a8fd1 100%);padding:20px 28px;border-radius:12px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between">
+  <div>
+    <div style="color:white;font-family:'Open Sans',sans-serif;font-size:22px;font-weight:800;letter-spacing:-0.3px">Server Overzicht – Prinses Maxima Centrum</div>
+    <div style="color:rgba(255,255,255,0.8);font-size:12px;margin-top:4px">VMware vCenter rapportage · {len(df)} van {len(df_all)} servers zichtbaar</div>
+  </div>
+  <div style="text-align:right;color:rgba(255,255,255,0.7);font-size:11px">
+    <div style="font-size:20px;font-weight:900;color:white;letter-spacing:-1px">RAM IT</div>
+    <div>Gegenereerd {NOW.strftime('%d-%m-%Y %H:%M')}</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 
 # ─── KPI Cards ────────────────────────────────────────────────────────────────
@@ -349,7 +369,7 @@ with col1:
     )
     fig.update_layout(margin=dict(t=40, b=0, l=0, r=0), height=260,
                       legend=dict(orientation="h", y=-0.1),
-                      title_font_size=14)
+                      title_font_size=14, title_font_family="Open Sans", font_family="Open Sans")
     fig.update_traces(textposition="inside", textinfo="percent+label")
     st.plotly_chart(fig, use_container_width=True, key="chart_status")
 
@@ -365,7 +385,7 @@ with col2:
     )
     fig2.update_layout(margin=dict(t=40, b=0, l=0, r=0), height=260,
                        legend=dict(orientation="h", y=-0.1),
-                       title_font_size=14)
+                       title_font_size=14, title_font_family="Open Sans", font_family="Open Sans")
     fig2.update_traces(textposition="inside", textinfo="percent+label")
     st.plotly_chart(fig2, use_container_width=True, key="chart_backup")
 
@@ -376,7 +396,7 @@ with col3:
     tools_counts["label"] = tools_counts["status"].map(TOOLS_LABELS).fillna(tools_counts["status"])
     colors = {
         "OK": "#48bb78", "Verouderd": "#fbd38d",
-        "Niet actief": "#fc8181", "Niet geïnstalleerd": "#fc8181", "Onbekend": "#e2e8f0",
+        "Niet actief": "#fc8181", "Niet geïnstalleerd": "#fc8181", "Onbekend": "#2ea3f2",
     }
     fig3 = px.bar(
         tools_counts, x="label", y="aantal",
