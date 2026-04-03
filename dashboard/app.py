@@ -216,6 +216,24 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ─── Login ─────────────────────────────────────────────────────────────────────
+def check_password():
+    if st.session_state.get("authenticated"):
+        return True
+    st.markdown("## 🔐 Inloggen")
+    st.markdown("Voer het wachtwoord in om het dashboard te openen.")
+    pw = st.text_input("Wachtwoord", type="password", key="pw_input")
+    if st.button("Inloggen", use_container_width=False):
+        if pw == st.secrets.get("APP_PASSWORD", ""):
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Onjuist wachtwoord.")
+    return False
+
+if not check_password():
+    st.stop()
+
 st.markdown("""
 <style>
   [data-testid="stMetricValue"] { font-size: 2rem !important; font-weight: 800 !important; }
