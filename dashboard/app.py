@@ -497,7 +497,7 @@ df_display["backup_datum"] = df["backup_datum"].apply(fmt_date)
 df_display["laatste_reboot"] = df["laatste_reboot"].apply(fmt_date)
 df_display["ha_beschermd"] = df_display["ha_beschermd"].map({True: "✅ HA", False: "–"})
 df_display["geheugen_gib"] = df_display["geheugen_gib"].apply(lambda x: f"{x} GB")
-df_display["vcpu_ram"]     = df["vcpu"].astype(str) + " vCPU / " + df["geheugen_gib"].apply(lambda x: f"{x} GB")
+df_display["vcpu_ram"]     = df.apply(lambda r: f"{r['vcpu']} vCPU / {r['geheugen_gib']} GB", axis=1) if not df.empty else pd.Series([], dtype=str)
 
 col_rename = {
     "naam":           "Naam",
