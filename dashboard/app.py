@@ -70,16 +70,73 @@ def safe_dt(val):
 @st.cache_data(ttl=300, show_spinner="Data laden uit Excel-bestanden…")
 def load_data():
     # ── Bestand 1 ──────────────────────────────────────────────────────────────
-    df_info  = pd.read_excel(FILE1, sheet_name="vInfo",     engine="openpyxl")
-    df_tools = pd.read_excel(FILE1, sheet_name="vTools",    engine="openpyxl")
-    df_host  = pd.read_excel(FILE1, sheet_name="vHost",     engine="openpyxl")
-    df_snap  = pd.read_excel(FILE1, sheet_name="vSnapshot", engine="openpyxl")
+    df_info      = pd.read_excel(FILE1, sheet_name="vInfo",      engine="openpyxl")
+    df_tools     = pd.read_excel(FILE1, sheet_name="vTools",     engine="openpyxl")
+    df_host      = pd.read_excel(FILE1, sheet_name="vHost",      engine="openpyxl")
+    df_snap      = pd.read_excel(FILE1, sheet_name="vSnapshot",  engine="openpyxl")
+    df_partition = pd.read_excel(FILE1, sheet_name="vPartition", engine="openpyxl")
+    df_memory    = pd.read_excel(FILE1, sheet_name="vMemory",    engine="openpyxl")
+    df_cpu       = pd.read_excel(FILE1, sheet_name="vCPU",       engine="openpyxl")
+    df_health    = pd.read_excel(FILE1, sheet_name="vHealth",    engine="openpyxl")
+    df_network   = pd.read_excel(FILE1, sheet_name="vNetwork",   engine="openpyxl")
 
     df_info  = df_info[df_info["Template"] != True].copy()
 
     tools_map = {r["VM"]: r for _, r in df_tools.iterrows()}
     host_map  = {r["Host"]: r for _, r in df_host.iterrows()}
     snap_vms  = set(df_snap[df_snap["Name"] != "VEEAM BACKUP TEMPORARY SNAPSHOT"]["VM"].tolist())
+
+    # Partitie-aggregatie per VM
+    part_map = {}
+    for _, p in df_partition.iterrows():
+        vm = p["VM"]
+        entry = {"disk": str(p.get("Disk", "")), "capacity_mib": p.get("Capacity MiB", 0),
+                 "consumed_mib": p.get("Consumed MiB", 0), "free_mib": p.get("Free MiB", 0),
+                 "free_pct": int(p.get("Free %", 0) or 0)}
+        part_map.setdefault(vm, []).append(entry)
+
+    # Memory per VM
+    mem_map = {}
+    for _, m in df_memory.iterrows():
+        mem_map[m["VM"]] = {
+            "mem_size": int(m.get("Size MiB", 0) or 0),
+            "mem_consumed": int(m.get("Consumed", 0) or 0),
+            "mem_active": int(m.get("Active", 0) or 0),
+            "mem_swapped": int(m.get("Swapped", 0) or 0),
+            "mem_ballooned": int(m.get("Ballooned", 0) or 0),
+        }
+
+    # CPU per VM
+    cpu_map = {}
+    for _, c in df_cpu.iterrows():
+        max_mhz = int(c.get("Max", 0) or 0)
+        overall  = int(c.get("Overall", 0) or 0)
+        cpu_map[c["VM"]] = {
+            "cpu_overall_mhz": overall,
+            "cpu_max_mhz": max_mhz,
+            "cpu_pct": round(overall / max_mhz * 100) if max_mhz else 0,
+        }
+
+    # Health messages per VM
+    health_map = {}
+    for _, h in df_health.iterrows():
+        vm = h.get("Name", "")
+        msg = str(h.get("Message", "") or "")
+        if vm and msg:
+            health_map.setdefault(vm, []).append(msg)
+
+    # Network per VM
+    nic_map = {}
+    for _, n in df_network.iterrows():
+        vm = n["VM"]
+        nic_map.setdefault(vm, []).append({
+            "nic": str(n.get("NIC label", "") or ""),
+            "network": str(n.get("Network", "") or ""),
+            "switch": str(n.get("Switch", "") or ""),
+            "connected": bool(n.get("Connected", False)),
+            "mac": str(n.get("Mac Address", "") or ""),
+            "ipv4": str(n.get("IPv4 Address", "") or ""),
+        })
 
     records = []
     for _, r in df_info.iterrows():
@@ -138,6 +195,20 @@ def load_data():
             "heeft_snapshot":    vm in snap_vms,
             "bron":              "PMC",
             "alarmering":        str(r.get("Alarmering", "") or ""),
+            # Nieuwe velden
+            "partitions":        part_map.get(vm, []),
+            "min_free_pct":      min((p["free_pct"] for p in part_map.get(vm, [])), default=None),
+            "mem_size":          mem_map.get(vm, {}).get("mem_size"),
+            "mem_consumed":      mem_map.get(vm, {}).get("mem_consumed"),
+            "mem_active":        mem_map.get(vm, {}).get("mem_active"),
+            "mem_swapped":       mem_map.get(vm, {}).get("mem_swapped"),
+            "mem_ballooned":     mem_map.get(vm, {}).get("mem_ballooned"),
+            "mem_pct":           round(mem_map.get(vm, {}).get("mem_consumed", 0) / mem_map.get(vm, {}).get("mem_size", 1) * 100) if mem_map.get(vm, {}).get("mem_size") else None,
+            "cpu_overall_mhz":   cpu_map.get(vm, {}).get("cpu_overall_mhz"),
+            "cpu_max_mhz":       cpu_map.get(vm, {}).get("cpu_max_mhz"),
+            "cpu_pct":           cpu_map.get(vm, {}).get("cpu_pct"),
+            "health_messages":   health_map.get(vm, []),
+            "nics":              nic_map.get(vm, []),
         })
 
     df1 = pd.DataFrame(records)
@@ -202,6 +273,20 @@ def load_data():
             "heeft_snapshot":    False,
             "bron":              "RAM-DC",
             "alarmering":        str(r.get("Alarmering", "") or ""),
+            # Nieuwe velden (niet beschikbaar in bestand 2)
+            "partitions":        [],
+            "min_free_pct":      None,
+            "mem_size":          None,
+            "mem_consumed":      None,
+            "mem_active":        None,
+            "mem_swapped":       None,
+            "mem_ballooned":     None,
+            "mem_pct":           None,
+            "cpu_overall_mhz":   None,
+            "cpu_max_mhz":       None,
+            "cpu_pct":           None,
+            "health_messages":   [],
+            "nics":              [],
         })
 
     df2 = pd.DataFrame(records2)
@@ -354,10 +439,10 @@ st.divider()
 
 
 # ─── Grafieken ─────────────────────────────────────────────────────────────────
-col1, col2, col3 = st.columns(3)
+row1_c1, row1_c2, row1_c3 = st.columns(3)
 
 # Donut: Status
-with col1:
+with row1_c1:
     status_counts = df["status"].value_counts()
     label_map = {"poweredOn": "Aan", "poweredOff": "Uit", "suspended": "Gesuspendeerd"}
     fig = px.pie(
@@ -374,7 +459,7 @@ with col1:
     st.plotly_chart(fig, use_container_width=True, key="chart_status")
 
 # Donut: Backup
-with col2:
+with row1_c2:
     bk_counts = df["backup_flag"].value_counts()
     fig2 = px.pie(
         values=bk_counts.values,
@@ -390,7 +475,7 @@ with col2:
     st.plotly_chart(fig2, use_container_width=True, key="chart_backup")
 
 # Bar: Tools status
-with col3:
+with row1_c3:
     tools_counts = df["tools_status"].value_counts().reset_index()
     tools_counts.columns = ["status", "aantal"]
     tools_counts["label"] = tools_counts["status"].map(TOOLS_LABELS).fillna(tools_counts["status"])
@@ -406,10 +491,46 @@ with col3:
         text="aantal",
     )
     fig3.update_layout(margin=dict(t=40, b=0, l=0, r=0), height=260,
-                       showlegend=False, title_font_size=14,
+                       showlegend=False, title_font_size=14, title_font_family="Open Sans", font_family="Open Sans",
                        xaxis_title="", yaxis_title="Aantal VMs")
     fig3.update_traces(textposition="outside")
     st.plotly_chart(fig3, use_container_width=True, key="chart_tools")
+
+# Rij 2: Schijfruimte + CPU/RAM
+row2_c1, row2_c2 = st.columns(2)
+
+with row2_c1:
+    disk_data = df[df["min_free_pct"].notna()].nsmallest(10, "min_free_pct")[["naam", "min_free_pct"]].copy()
+    if not disk_data.empty:
+        disk_data["min_free_pct"] = disk_data["min_free_pct"].astype(int)
+        disk_data["kleur"] = disk_data["min_free_pct"].apply(lambda x: "#fc8181" if x < 15 else ("#fbd38d" if x < 30 else "#48bb78"))
+        fig4 = px.bar(disk_data, y="naam", x="min_free_pct", orientation="h",
+                       title="Top 10 laagste schijfruimte (% vrij)", text="min_free_pct",
+                       color="min_free_pct", color_continuous_scale=["#fc8181", "#fbd38d", "#48bb78"],
+                       range_color=[0, 100])
+        fig4.update_layout(margin=dict(t=40, b=0, l=0, r=0), height=300,
+                           showlegend=False, title_font_size=14, title_font_family="Open Sans", font_family="Open Sans",
+                           xaxis_title="% vrij", yaxis_title="", coloraxis_showscale=False,
+                           yaxis=dict(autorange="reversed"))
+        fig4.update_traces(texttemplate="%{text}%", textposition="outside")
+        st.plotly_chart(fig4, use_container_width=True, key="chart_disk")
+    else:
+        st.info("Geen schijfdata beschikbaar")
+
+with row2_c2:
+    perf_data = df[(df["cpu_pct"].notna()) & (df["mem_pct"].notna())][["naam", "cpu_pct", "mem_pct", "geheugen_gib"]].copy()
+    if not perf_data.empty:
+        fig5 = px.scatter(perf_data, x="cpu_pct", y="mem_pct", size="geheugen_gib",
+                          hover_name="naam", title="CPU vs RAM gebruik per VM",
+                          labels={"cpu_pct": "CPU %", "mem_pct": "RAM %", "geheugen_gib": "Geheugen (GB)"},
+                          color_discrete_sequence=["#5b2882"])
+        fig5.add_hline(y=95, line_dash="dash", line_color="#fc8181", annotation_text="RAM 95%")
+        fig5.add_vline(x=90, line_dash="dash", line_color="#fc8181", annotation_text="CPU 90%")
+        fig5.update_layout(margin=dict(t=40, b=0, l=0, r=0), height=300,
+                           title_font_size=14, title_font_family="Open Sans", font_family="Open Sans")
+        st.plotly_chart(fig5, use_container_width=True, key="chart_perf")
+    else:
+        st.info("Geen CPU/RAM data beschikbaar")
 
 
 # ─── Aandachtspunten ───────────────────────────────────────────────────────────
@@ -419,8 +540,12 @@ if show_alerts:
     tools_bad    = df[df["tools_status"].isin(["toolsOld", "toolsNotRunning", "toolsNotInstalled"])]
     old_reboot   = df[(df["dagen_reboot"].notna()) & (df["dagen_reboot"] > REBOOT_WARN_DAYS)]
     snaps        = df[df["heeft_snapshot"] == True]
+    disk_low     = df[(df["min_free_pct"].notna()) & (df["min_free_pct"] < 15)]
+    mem_swap     = df[(df["mem_swapped"].notna()) & ((df["mem_swapped"] > 0) | (df["mem_ballooned"] > 0))]
+    cpu_high     = df[(df["cpu_pct"].notna()) & (df["cpu_pct"] > 90)]
+    health_warns = df[df["health_messages"].apply(lambda x: len(x) > 0 if isinstance(x, list) else False)]
 
-    total_alerts = len(no_backup) + len(stale_backup) + len(tools_bad)
+    total_alerts = len(no_backup) + len(stale_backup) + len(tools_bad) + len(disk_low) + len(mem_swap) + len(cpu_high)
 
     with st.expander(f"⚠️ Aandachtspunten ({total_alerts} items)", expanded=total_alerts > 0):
         a1, a2, a3 = st.columns(3)
@@ -433,6 +558,10 @@ if show_alerts:
                             "</div>", unsafe_allow_html=True)
             else:
                 st.success("✅ Alle VMs hebben backup geconfigureerd")
+            if not disk_low.empty:
+                items_d = [f"• {r['naam']} ({int(r['min_free_pct'])}% vrij)" for _, r in disk_low.iterrows()]
+                st.markdown(f'<div class="alert-box"><strong>💾 {len(disk_low)} VMs schijfruimte &lt; 15% vrij</strong><br>' +
+                            "<br>".join(items_d[:10]) + "</div>", unsafe_allow_html=True)
 
         with a2:
             if not stale_backup.empty:
@@ -445,8 +574,16 @@ if show_alerts:
                 items2 = [f"• {r['naam']} ({label_map2.get(r['tools_status'], '')})" for _, r in tools_bad.iterrows()]
                 st.markdown(f'<div class="warn-box"><strong>🔧 {len(tools_bad)} VMs – VMware Tools aandacht</strong><br>' +
                             "<br>".join(items2[:10]) + "</div>", unsafe_allow_html=True)
+            if not mem_swap.empty:
+                items_m = [f"• {r['naam']} (swap: {r['mem_swapped']}M / balloon: {r['mem_ballooned']}M)" for _, r in mem_swap.iterrows()]
+                st.markdown(f'<div class="warn-box"><strong>🧠 {len(mem_swap)} VMs met geheugen swap/balloon</strong><br>' +
+                            "<br>".join(items_m[:10]) + "</div>", unsafe_allow_html=True)
 
         with a3:
+            if not cpu_high.empty:
+                items_c = [f"• {r['naam']} ({int(r['cpu_pct'])}%)" for _, r in cpu_high.iterrows()]
+                st.markdown(f'<div class="alert-box"><strong>🔥 {len(cpu_high)} VMs CPU-gebruik &gt; 90%</strong><br>' +
+                            "<br>".join(items_c[:10]) + "</div>", unsafe_allow_html=True)
             if not old_reboot.empty:
                 st.markdown(f'<div class="info-box"><strong>🔄 {len(old_reboot)} VMs niet herstart > {REBOOT_WARN_DAYS} dagen</strong><br>' +
                             "<br>".join(f"• {r['naam']}" for _, r in old_reboot.head(8).iterrows()) + "</div>",
@@ -454,6 +591,10 @@ if show_alerts:
             if not snaps.empty:
                 st.markdown(f'<div class="info-box"><strong>📸 {len(snaps)} VMs met actieve snapshot</strong><br>' +
                             "<br>".join(f"• {r['naam']}" for _, r in snaps.iterrows()) + "</div>",
+                            unsafe_allow_html=True)
+            if not health_warns.empty:
+                st.markdown(f'<div class="info-box"><strong>⚕️ {len(health_warns)} VMs met health waarschuwingen</strong><br>' +
+                            "<br>".join(f"• {r['naam']}" for _, r in health_warns.head(8).iterrows()) + "</div>",
                             unsafe_allow_html=True)
 
 
@@ -476,6 +617,43 @@ def fmt_tools(s):
 def fmt_backup(f):
     return "✅ Ja" if f == "Ja" else "❌ Nee"
 
+def fmt_pct(val, thresholds_green, thresholds_orange):
+    """Badge voor percentages. thresholds in 'lager is slechter' modus (schijf) of 'hoger is slechter' modus (CPU/RAM)."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return "–"
+    val = int(val)
+    return f"{val}%"
+
+def fmt_disk_pct(val):
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return "–"
+    val = int(val)
+    if val < 15:
+        return f"🔴 {val}%"
+    elif val < 30:
+        return f"🟠 {val}%"
+    return f"🟢 {val}%"
+
+def fmt_cpu_pct(val):
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return "–"
+    val = int(val)
+    if val > 90:
+        return f"🔴 {val}%"
+    elif val > 70:
+        return f"🟠 {val}%"
+    return f"🟢 {val}%"
+
+def fmt_ram_pct(val):
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return "–"
+    val = int(val)
+    if val > 95:
+        return f"🔴 {val}%"
+    elif val > 80:
+        return f"🟠 {val}%"
+    return f"🟢 {val}%"
+
 def fmt_date(dt):
     if dt is None or (hasattr(dt, '__class__') and 'NaT' in str(type(dt))):
         return ""
@@ -487,17 +665,21 @@ def fmt_date(dt):
 df_display = df[[
     "naam", "status", "locatie", "beheerder", "os",
     "tools_status", "update_moment", "laatste_reboot", "backup_flag", "backup_datum",
-    "ip_adres", "vcpu", "geheugen_gib", "sql_versie", "ha_beschermd", "functie"
+    "ip_adres", "vcpu", "geheugen_gib", "min_free_pct", "cpu_pct", "mem_pct",
+    "sql_versie", "ha_beschermd", "functie"
 ]].copy()
 
-df_display["status"]       = df_display["status"].map(fmt_status)
-df_display["tools_status"] = df_display["tools_status"].map(fmt_tools)
-df_display["backup_flag"]  = df_display["backup_flag"].map(fmt_backup)
-df_display["backup_datum"] = df["backup_datum"].apply(fmt_date)
+df_display["status"]         = df_display["status"].map(fmt_status)
+df_display["tools_status"]   = df_display["tools_status"].map(fmt_tools)
+df_display["backup_flag"]    = df_display["backup_flag"].map(fmt_backup)
+df_display["backup_datum"]   = df["backup_datum"].apply(fmt_date)
 df_display["laatste_reboot"] = df["laatste_reboot"].apply(fmt_date)
-df_display["ha_beschermd"] = df_display["ha_beschermd"].map({True: "✅ HA", False: "–"})
-df_display["geheugen_gib"] = df_display["geheugen_gib"].apply(lambda x: f"{x} GB")
-df_display["vcpu_ram"]     = df.apply(lambda r: f"{r['vcpu']} vCPU / {r['geheugen_gib']} GB", axis=1) if not df.empty else pd.Series([], dtype=str)
+df_display["ha_beschermd"]   = df_display["ha_beschermd"].map({True: "✅ HA", False: "–"})
+df_display["geheugen_gib"]   = df_display["geheugen_gib"].apply(lambda x: f"{x} GB")
+df_display["min_free_pct"]   = df["min_free_pct"].apply(fmt_disk_pct)
+df_display["cpu_pct"]        = df["cpu_pct"].apply(fmt_cpu_pct)
+df_display["mem_pct"]        = df["mem_pct"].apply(fmt_ram_pct)
+df_display["vcpu_ram"]       = df.apply(lambda r: f"{r['vcpu']} vCPU / {r['geheugen_gib']} GB", axis=1) if not df.empty else pd.Series([], dtype=str)
 
 col_rename = {
     "naam":           "Naam",
@@ -513,6 +695,9 @@ col_rename = {
     "ip_adres":       "IP Adres",
     "vcpu":           "vCPU",
     "geheugen_gib":   "RAM",
+    "min_free_pct":   "Schijf Vrij",
+    "cpu_pct":        "CPU",
+    "mem_pct":        "RAM %",
     "sql_versie":     "SQL Versie",
     "ha_beschermd":   "HA",
     "functie":        "Functie",
@@ -520,7 +705,8 @@ col_rename = {
 
 df_show = df_display[[
     "naam", "status", "locatie", "beheerder", "os",
-    "tools_status", "update_moment", "laatste_reboot",
+    "tools_status", "min_free_pct", "cpu_pct", "mem_pct",
+    "update_moment", "laatste_reboot",
     "backup_flag", "backup_datum", "ip_adres",
     "vcpu", "geheugen_gib", "sql_versie", "ha_beschermd", "functie"
 ]].rename(columns=col_rename)
@@ -540,6 +726,9 @@ event = st.dataframe(
         "Besturingssysteem": st.column_config.TextColumn("OS", width="large"),
         "VMware Tools":      st.column_config.TextColumn("VMware Tools", width="medium"),
         "IP Adres":          st.column_config.TextColumn("IP Adres", width="small"),
+        "Schijf Vrij":       st.column_config.TextColumn("Schijf", width="small"),
+        "CPU":               st.column_config.TextColumn("CPU", width="small"),
+        "RAM %":             st.column_config.TextColumn("RAM %", width="small"),
         "vCPU":              st.column_config.NumberColumn("vCPU", width="small"),
         "RAM":               st.column_config.TextColumn("RAM", width="small"),
         "SQL Versie":        st.column_config.TextColumn("SQL", width="small"),
@@ -560,7 +749,7 @@ if show_details:
         st.divider()
         st.markdown(f"## 🔍 Detail: **{vm['naam']}**")
 
-        tab1, tab2, tab3, tab4 = st.tabs(["📋 Overzicht", "💾 Backup & Reboot", "⚙️ VMware Tools", "🌐 Netwerk & Hardware"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📋 Overzicht", "💾 Opslag", "🔄 Backup & Reboot", "⚙️ VMware Tools & Health", "🌐 Netwerk"])
 
         with tab1:
             d1, d2, d3 = st.columns(3)
@@ -581,9 +770,21 @@ if show_details:
                 st.write(f"**Functie:** {vm['functie'] or '–'}")
                 st.write(f"**Soort:** {vm['soort'] or '–'}")
             with d3:
-                st.markdown("**Hardware**")
+                st.markdown("**Hardware & Performance**")
                 st.write(f"**vCPU's:** {vm['vcpu']}")
+                if vm['cpu_pct'] is not None and not (isinstance(vm['cpu_pct'], float) and pd.isna(vm['cpu_pct'])):
+                    st.write(f"**CPU gebruik:** {fmt_cpu_pct(vm['cpu_pct'])} ({vm['cpu_overall_mhz']} / {vm['cpu_max_mhz']} MHz)")
+                else:
+                    st.write("**CPU gebruik:** –")
                 st.write(f"**Geheugen:** {vm['geheugen_gib']} GB")
+                if vm['mem_pct'] is not None and not (isinstance(vm['mem_pct'], float) and pd.isna(vm['mem_pct'])):
+                    st.write(f"**RAM gebruik:** {fmt_ram_pct(vm['mem_pct'])} ({vm['mem_consumed']} / {vm['mem_size']} MiB)")
+                    if vm['mem_swapped'] and vm['mem_swapped'] > 0:
+                        st.write(f"**⚠️ Swapped:** {vm['mem_swapped']} MiB")
+                    if vm['mem_ballooned'] and vm['mem_ballooned'] > 0:
+                        st.write(f"**⚠️ Ballooned:** {vm['mem_ballooned']} MiB")
+                else:
+                    st.write("**RAM gebruik:** –")
                 st.write(f"**OS:** {vm['os'] or '–'}")
                 st.write(f"**Kernel:** {vm['kernel_versie'] or '–'}")
                 if vm['sql_versie']:
@@ -591,14 +792,39 @@ if show_details:
                 st.write(f"**HA Beschermd:** {'✅ Ja' if vm['ha_beschermd'] else '❌ Nee'}")
 
         with tab2:
+            partitions = vm['partitions'] if isinstance(vm['partitions'], list) else []
+            if partitions:
+                st.markdown("**Schijfpartities**")
+                for p in partitions:
+                    cap   = p['capacity_mib']
+                    used  = p['consumed_mib']
+                    free  = p['free_pct']
+                    pct   = round((1 - free / 100) * 100) if cap else 0
+                    color = "#48bb78" if free >= 30 else ("#fbd38d" if free >= 15 else "#fc8181")
+                    st.markdown(f"""
+                    <div style="margin-bottom:10px">
+                      <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:3px">
+                        <span>{p['disk'] or 'Onbekend'}</span>
+                        <span>{free}% vrij ({round(p['free_mib']/1024, 1)} GB van {round(cap/1024, 1)} GB)</span>
+                      </div>
+                      <div style="background:#e2e8f0;border-radius:6px;height:14px;overflow:hidden">
+                        <div style="background:{color};height:100%;width:{pct}%;border-radius:6px;transition:width 0.3s"></div>
+                      </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("Geen partitie-data beschikbaar voor deze VM.")
+
+        with tab3:
             b1, b2 = st.columns(2)
             with b1:
                 st.markdown("**Backup**")
                 st.write(f"**Geconfigureerd:** {fmt_backup(vm['backup_flag'])}")
-                if vm['backup_datum']:
+                backup_dt_str = fmt_date(vm['backup_datum'])
+                if backup_dt_str:
                     dagen = vm['dagen_backup']
                     kleur = "🟢" if dagen <= BACKUP_WARN_DAYS else "🔴"
-                    st.write(f"**Laatste backup:** {kleur} {vm['backup_datum'].strftime('%d-%m-%Y %H:%M')} ({dagen} dagen geleden)")
+                    st.write(f"**Laatste backup:** {kleur} {backup_dt_str} ({dagen} dagen geleden)")
                 else:
                     st.write("**Laatste backup:** –")
                 if vm['backup_str']:
@@ -622,20 +848,38 @@ if show_details:
                 st.write(f"**Patch schema:** {vm['update_schema'] or '–'}")
                 st.write(f"**Patch moment:** {vm['update_moment'] or '–'}")
 
-        with tab3:
-            st.write(f"**Tools Status:** {fmt_tools(vm['tools_status'])}")
-            st.write(f"**Tools Versie:** {vm['tools_versie'] or '–'}")
-            st.write(f"**Upgradeable:** {vm['tools_upgradeable'] or '–'}")
-            st.write(f"**Alarmering:** {vm['alarmering'] or '–'}")
-            if vm['heeft_snapshot']:
-                st.warning("⚠️ Deze VM heeft een actieve snapshot")
-
         with tab4:
-            st.write(f"**IP Adres:** {vm['ip_adres'] or '–'}")
+            t1, t2 = st.columns(2)
+            with t1:
+                st.markdown("**VMware Tools**")
+                st.write(f"**Tools Status:** {fmt_tools(vm['tools_status'])}")
+                st.write(f"**Tools Versie:** {vm['tools_versie'] or '–'}")
+                st.write(f"**Upgradeable:** {vm['tools_upgradeable'] or '–'}")
+                st.write(f"**Alarmering:** {vm['alarmering'] or '–'}")
+                if vm['heeft_snapshot']:
+                    st.warning("⚠️ Deze VM heeft een actieve snapshot")
+            with t2:
+                health = vm['health_messages'] if isinstance(vm['health_messages'], list) else []
+                if health:
+                    st.markdown("**Health Waarschuwingen**")
+                    for msg in health:
+                        st.warning(msg)
+                else:
+                    st.success("✅ Geen health waarschuwingen")
+
+        with tab5:
+            nics = vm['nics'] if isinstance(vm['nics'], list) else []
+            if nics:
+                st.markdown("**Netwerk Adapters**")
+                nic_df = pd.DataFrame(nics)
+                nic_df.columns = ["NIC", "VLAN", "Switch", "Connected", "MAC", "IPv4"]
+                nic_df["Connected"] = nic_df["Connected"].map({True: "✅", False: "❌"})
+                st.dataframe(nic_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("Geen netwerkdata beschikbaar voor deze VM.")
+            st.write(f"**IP Adres (primair):** {vm['ip_adres'] or '–'}")
             if vm['wiki_link']:
                 st.markdown(f"**Wiki:** [{vm['wiki_link']}]({vm['wiki_link']})")
-            st.write(f"**Cluster:** {vm['cluster'] or '–'}")
-            st.write(f"**ESXi Host:** {vm['esxi_host'] or '–'}")
 
     else:
         st.info("👆 Klik op een rij in de tabel om details te zien.")
