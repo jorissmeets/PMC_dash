@@ -321,20 +321,55 @@ if not check_password():
 
 st.markdown("""
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;600;700;800&display=swap');
+
+  /* Base font */
   html, body, [class*="css"] { font-family: 'Open Sans', -apple-system, sans-serif !important; }
+
+  /* KPI metrics */
   [data-testid="stMetricValue"] { font-size: 2rem !important; font-weight: 800 !important; color: #5b2882 !important; }
-  [data-testid="stMetricLabel"] { font-size: 0.75rem !important; text-transform: uppercase; letter-spacing: 0.5px; }
+  [data-testid="stMetricLabel"] { font-size: 0.7rem !important; text-transform: uppercase; letter-spacing: 0.6px; color: #666 !important; }
+  [data-testid="stMetricDelta"] { color: #c49a2c !important; }
+
+  /* Sidebar: gradient matching RAM presentation */
+  [data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #5b2882 0%, #3d5a9e 60%, #4a8fd9 100%) !important;
+  }
+  [data-testid="stSidebar"] * { color: white !important; }
+  [data-testid="stSidebar"] label { color: rgba(255,255,255,0.7) !important; font-size: 11px !important; text-transform: uppercase; letter-spacing: 0.5px; }
+  [data-testid="stSidebar"] .stSelectbox > div > div { background: rgba(255,255,255,0.12) !important; border: 1px solid rgba(255,255,255,0.2) !important; color: white !important; }
+  [data-testid="stSidebar"] input { background: rgba(255,255,255,0.12) !important; border: 1px solid rgba(255,255,255,0.2) !important; color: white !important; }
+  [data-testid="stSidebar"] .stCheckbox label span { color: rgba(255,255,255,0.9) !important; }
+  [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.15) !important; }
+
+  /* Status badges */
   .status-aan   { color: #276749; background: #c6f6d5; border-radius: 12px; padding: 2px 10px; font-size: 12px; font-weight: 700; }
   .status-uit   { color: #9b2c2c; background: #fed7d7; border-radius: 12px; padding: 2px 10px; font-size: 12px; font-weight: 700; }
   .status-susp  { color: #744210; background: #fefcbf; border-radius: 12px; padding: 2px 10px; font-size: 12px; font-weight: 700; }
-  .alert-box    { border-left: 4px solid #e53e3e; background: #fff5f5; padding: 10px 14px; border-radius: 0 8px 8px 0; margin-bottom: 8px; }
-  .warn-box     { border-left: 4px solid #dd6b20; background: #fffbeb; padding: 10px 14px; border-radius: 0 8px 8px 0; margin-bottom: 8px; }
-  .info-box     { border-left: 4px solid #5b2882; background: #ebf8ff; padding: 10px 14px; border-radius: 0 8px 8px 0; margin-bottom: 8px; }
+
+  /* Alert boxes */
+  .alert-box    { border-left: 4px solid #e53e3e; background: #fff5f5; padding: 12px 16px; border-radius: 0 10px 10px 0; margin-bottom: 8px; }
+  .warn-box     { border-left: 4px solid #c49a2c; background: #fefcf0; padding: 12px 16px; border-radius: 0 10px 10px 0; margin-bottom: 8px; }
+  .info-box     { border-left: 4px solid #4a8fd9; background: #f0f6ff; padding: 12px 16px; border-radius: 0 10px 10px 0; margin-bottom: 8px; }
+
+  /* Expander */
   div[data-testid="stExpander"] summary { font-weight: 600; }
-  [data-testid="stSidebar"] { background: #f8fafc; }
-  .stButton > button { background: #5b2882 !important; color: white !important; border: none !important; font-family: 'Open Sans', sans-serif !important; font-weight: 600 !important; }
-  .stButton > button:hover { background: #4a2070 !important; }
+  div[data-testid="stExpander"] { border: 1px solid #e8e0f0 !important; border-radius: 10px !important; }
+
+  /* Buttons */
+  .stButton > button { background: linear-gradient(135deg, #5b2882, #4a8fd9) !important; color: white !important; border: none !important; font-family: 'Open Sans', sans-serif !important; font-weight: 600 !important; border-radius: 8px !important; }
+  .stButton > button:hover { background: linear-gradient(135deg, #4a2070, #3d7bc4) !important; }
+
+  /* Tabs styling */
+  .stTabs [data-baseweb="tab-list"] { gap: 4px; }
+  .stTabs [data-baseweb="tab"] { background: #f5f0fa; border-radius: 8px 8px 0 0; padding: 8px 16px; }
+  .stTabs [aria-selected="true"] { background: #5b2882 !important; color: white !important; }
+
+  /* Dividers: gold accent */
+  hr { border-color: #e8dcc8 !important; }
+
+  /* Dataframe header */
+  [data-testid="stDataFrame"] th { background: #5b2882 !important; color: white !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -346,11 +381,14 @@ df_all = load_data()
 # ─── Sidebar filters ───────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""
-    <div style="background:linear-gradient(135deg,#5b2882,#4a2070);padding:16px 14px;border-radius:10px;margin-bottom:8px">
-      <div style="color:white;font-family:'Open Sans',sans-serif;font-size:22px;font-weight:800;letter-spacing:-0.5px">RAM IT</div>
-      <div style="color:rgba(255,255,255,0.85);font-size:11px;margin-top:2px">Server Overzicht</div>
+    <div style="padding:8px 0 12px 0;margin-bottom:4px">
+      <div style="color:white;font-family:'Open Sans',sans-serif;font-size:24px;letter-spacing:-0.5px">
+        <span style="font-weight:300">ram</span> <span style="font-weight:800">infotechnology</span>
+      </div>
+      <div style="width:40px;height:3px;background:#c49a2c;border-radius:2px;margin-top:8px"></div>
+      <div style="color:rgba(255,255,255,0.7);font-size:11px;margin-top:8px;text-transform:uppercase;letter-spacing:1px">Server Overzicht</div>
+      <div style="color:rgba(255,255,255,0.5);font-size:11px;margin-top:2px">Prinses Maxima Centrum</div>
     </div>
-    <div style="font-size:12px;color:#555;margin-bottom:4px">📍 Prinses Maxima Centrum</div>
     """, unsafe_allow_html=True)
     st.caption(f"Data geladen: {NOW.strftime('%d-%m-%Y %H:%M')}")
 
@@ -406,14 +444,17 @@ if f_search:
 
 # ─── Header ───────────────────────────────────────────────────────────────────
 st.markdown(f"""
-<div style="background:linear-gradient(135deg,#5b2882 0%,#4a2070 100%);padding:20px 28px;border-radius:12px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between">
+<div style="background:linear-gradient(135deg,#5b2882 0%,#3d5a9e 50%,#4a8fd9 100%);padding:24px 32px;border-radius:14px;margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 4px 20px rgba(91,40,130,0.25)">
   <div>
-    <div style="color:white;font-family:'Open Sans',sans-serif;font-size:22px;font-weight:800;letter-spacing:-0.3px">Server Overzicht – Prinses Maxima Centrum</div>
-    <div style="color:rgba(255,255,255,0.8);font-size:12px;margin-top:4px">VMware vCenter rapportage · {len(df)} van {len(df_all)} servers zichtbaar</div>
+    <div style="color:rgba(255,255,255,0.6);font-size:10px;text-transform:uppercase;letter-spacing:2px;margin-bottom:4px">VMware vCenter Rapportage</div>
+    <div style="color:white;font-family:'Open Sans',sans-serif;font-size:24px;font-weight:800;letter-spacing:-0.3px">Server Overzicht</div>
+    <div style="color:rgba(255,255,255,0.8);font-size:13px;margin-top:2px">Prinses Maxima Centrum</div>
+    <div style="width:50px;height:3px;background:#c49a2c;border-radius:2px;margin-top:10px"></div>
+    <div style="color:rgba(255,255,255,0.6);font-size:11px;margin-top:8px">{len(df)} van {len(df_all)} servers zichtbaar</div>
   </div>
-  <div style="text-align:right;color:rgba(255,255,255,0.7);font-size:11px">
-    <div style="font-size:20px;font-weight:900;color:white;letter-spacing:-1px">RAM IT</div>
-    <div>Gegenereerd {NOW.strftime('%d-%m-%Y %H:%M')}</div>
+  <div style="text-align:right">
+    <div style="color:white;font-family:'Open Sans',sans-serif;font-size:20px;letter-spacing:-0.5px"><span style="font-weight:300">ram</span> <span style="font-weight:800">infotechnology</span></div>
+    <div style="color:rgba(255,255,255,0.5);font-size:11px;margin-top:4px">Gegenereerd {NOW.strftime('%d-%m-%Y %H:%M')}</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -450,7 +491,7 @@ with row1_c1:
         names=[label_map.get(s, s) for s in status_counts.index],
         title="Server Status",
         hole=0.55,
-        color_discrete_sequence=["#48bb78", "#fc8181", "#fbd38d"],
+        color_discrete_sequence=["#48bb78", "#e05a6b", "#c49a2c"],
     )
     fig.update_layout(margin=dict(t=40, b=0, l=0, r=0), height=260,
                       legend=dict(orientation="h", y=-0.1),
@@ -466,7 +507,7 @@ with row1_c2:
         names=bk_counts.index,
         title="Backup Status",
         hole=0.55,
-        color_discrete_map={"Ja": "#48bb78", "Nee": "#fc8181"},
+        color_discrete_map={"Ja": "#48bb78", "Nee": "#e05a6b"},
     )
     fig2.update_layout(margin=dict(t=40, b=0, l=0, r=0), height=260,
                        legend=dict(orientation="h", y=-0.1),
@@ -480,8 +521,8 @@ with row1_c3:
     tools_counts.columns = ["status", "aantal"]
     tools_counts["label"] = tools_counts["status"].map(TOOLS_LABELS).fillna(tools_counts["status"])
     colors = {
-        "OK": "#48bb78", "Verouderd": "#fbd38d",
-        "Niet actief": "#fc8181", "Niet geïnstalleerd": "#fc8181", "Onbekend": "#5b2882",
+        "OK": "#48bb78", "Verouderd": "#c49a2c",
+        "Niet actief": "#e05a6b", "Niet geïnstalleerd": "#e05a6b", "Onbekend": "#4a8fd9",
     }
     fig3 = px.bar(
         tools_counts, x="label", y="aantal",
@@ -506,7 +547,7 @@ with row2_c1:
         disk_data["kleur"] = disk_data["min_free_pct"].apply(lambda x: "#fc8181" if x < 15 else ("#fbd38d" if x < 30 else "#48bb78"))
         fig4 = px.bar(disk_data, y="naam", x="min_free_pct", orientation="h",
                        title="Top 10 laagste schijfruimte (% vrij)", text="min_free_pct",
-                       color="min_free_pct", color_continuous_scale=["#fc8181", "#fbd38d", "#48bb78"],
+                       color="min_free_pct", color_continuous_scale=["#e05a6b", "#c49a2c", "#48bb78"],
                        range_color=[0, 100])
         fig4.update_layout(margin=dict(t=40, b=0, l=0, r=0), height=300,
                            showlegend=False, title_font_size=14, title_font_family="Open Sans", font_family="Open Sans",
@@ -524,8 +565,8 @@ with row2_c2:
                           hover_name="naam", title="CPU vs RAM gebruik per VM",
                           labels={"cpu_pct": "CPU %", "mem_pct": "RAM %", "geheugen_gib": "Geheugen (GB)"},
                           color_discrete_sequence=["#5b2882"])
-        fig5.add_hline(y=95, line_dash="dash", line_color="#fc8181", annotation_text="RAM 95%")
-        fig5.add_vline(x=90, line_dash="dash", line_color="#fc8181", annotation_text="CPU 90%")
+        fig5.add_hline(y=95, line_dash="dash", line_color="#e05a6b", annotation_text="RAM 95%")
+        fig5.add_vline(x=90, line_dash="dash", line_color="#e05a6b", annotation_text="CPU 90%")
         fig5.update_layout(margin=dict(t=40, b=0, l=0, r=0), height=300,
                            title_font_size=14, title_font_family="Open Sans", font_family="Open Sans")
         st.plotly_chart(fig5, use_container_width=True, key="chart_perf")
@@ -800,7 +841,7 @@ if show_details:
                     used  = p['consumed_mib']
                     free  = p['free_pct']
                     pct   = round((1 - free / 100) * 100) if cap else 0
-                    color = "#48bb78" if free >= 30 else ("#fbd38d" if free >= 15 else "#fc8181")
+                    color = "#48bb78" if free >= 30 else ("#c49a2c" if free >= 15 else "#e05a6b")
                     st.markdown(f"""
                     <div style="margin-bottom:10px">
                       <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:3px">
