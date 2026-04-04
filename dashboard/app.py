@@ -541,7 +541,9 @@ with row1_c3:
 row2_c1, row2_c2 = st.columns(2)
 
 with row2_c1:
-    disk_data = df[df["min_free_pct"].notna()].nsmallest(10, "min_free_pct")[["naam", "min_free_pct"]].copy()
+    disk_df = df[df["min_free_pct"].notna()].copy()
+    disk_df["min_free_pct"] = pd.to_numeric(disk_df["min_free_pct"], errors="coerce")
+    disk_data = disk_df.nsmallest(10, "min_free_pct")[["naam", "min_free_pct"]].copy()
     if not disk_data.empty:
         disk_data["min_free_pct"] = disk_data["min_free_pct"].astype(int)
         disk_data["kleur"] = disk_data["min_free_pct"].apply(lambda x: "#fc8181" if x < 15 else ("#fbd38d" if x < 30 else "#48bb78"))
