@@ -343,24 +343,37 @@ st.set_page_config(
 def check_password():
     if st.session_state.get("authenticated"):
         return True
+
+    # Volledig scherm gradient achtergrond + verberg sidebar
     st.markdown("""
-    <div style="display:flex;align-items:center;justify-content:center;min-height:60vh">
-      <div style="text-align:center;max-width:380px">
-        <div style="font-family:'Open Sans',sans-serif;font-size:22px;letter-spacing:-0.5px;margin-bottom:4px">
-          <span style="font-weight:300;color:#5b2882">ram</span> <span style="font-weight:800;color:#5b2882">infotechnology</span>
-        </div>
-        <div style="width:40px;height:3px;background:#c49a2c;border-radius:2px;margin:8px auto 16px auto"></div>
-        <div style="color:#666;font-size:13px;margin-bottom:24px">Server Overzicht · Prinses Maxima Centrum</div>
-      </div>
-    </div>
+    <style>
+      [data-testid="stSidebar"] { display: none; }
+      .stApp { background: linear-gradient(135deg, #5b2882 0%, #3d5a9e 50%, #4a8fd9 100%) !important; }
+      [data-testid="stMainBlockContainer"] { display: flex; align-items: center; justify-content: center; min-height: 80vh; }
+    </style>
     """, unsafe_allow_html=True)
-    pw = st.text_input("Wachtwoord", type="password", key="pw_input", label_visibility="collapsed", placeholder="Wachtwoord")
-    if st.button("Inloggen", use_container_width=True):
-        if pw == st.secrets.get("APP_PASSWORD", ""):
-            st.session_state["authenticated"] = True
-            st.rerun()
-        else:
-            st.error("Onjuist wachtwoord.")
+
+    # Centreer login card
+    spacer_l, card, spacer_r = st.columns([1, 1.2, 1])
+    with card:
+        st.markdown("""
+        <div style="background:white;border-radius:16px;padding:40px 36px 32px 36px;box-shadow:0 8px 32px rgba(0,0,0,0.18);text-align:center">
+          <div style="font-family:'Open Sans',sans-serif;font-size:24px;letter-spacing:-0.5px;margin-bottom:4px">
+            <span style="font-weight:300;color:#5b2882">ram</span> <span style="font-weight:800;color:#5b2882">infotechnology</span>
+          </div>
+          <div style="width:36px;height:3px;background:#c49a2c;border-radius:2px;margin:10px auto 20px auto"></div>
+          <div style="color:#888;font-size:13px;margin-bottom:4px">Server Overzicht</div>
+          <div style="color:#aaa;font-size:12px;margin-bottom:0px">Prinses Maxima Centrum</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+        pw = st.text_input("Wachtwoord", type="password", key="pw_input", label_visibility="collapsed", placeholder="Wachtwoord")
+        if st.button("Inloggen", use_container_width=True):
+            if pw == st.secrets.get("APP_PASSWORD", ""):
+                st.session_state["authenticated"] = True
+                st.rerun()
+            else:
+                st.error("Onjuist wachtwoord.")
     return False
 
 if not check_password():
