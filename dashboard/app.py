@@ -705,6 +705,32 @@ event = st.dataframe(
 )
 
 
+# ─── SQL Licentie overzicht ───────────────────────────────────────────────────
+sql_vms = df_all[df_all["sql_lic_edition"] != ""].copy()
+if not sql_vms.empty:
+    total_cores = sql_vms["vcpu"].sum()
+    editions = sql_vms["sql_lic_edition"].value_counts()
+
+    with st.expander(f"🗄️ SQL Licenties via RAM IT ({len(sql_vms)} servers · {total_cores} cores)", expanded=False):
+        sq1, sq2 = st.columns([2, 1])
+        with sq1:
+            sql_tbl = sql_vms[["naam","functie","sql_lic_version","sql_lic_edition","vcpu","status"]].copy()
+            sql_tbl["status"] = sql_tbl["status"].map({"poweredOn": "✅", "poweredOff": "❌"})
+            sql_tbl = sql_tbl.rename(columns={
+                "naam": "Server", "functie": "Functie", "sql_lic_version": "SQL Versie",
+                "sql_lic_edition": "Editie", "vcpu": "Cores", "status": ""
+            })
+            st.dataframe(sql_tbl, use_container_width=True, hide_index=True, height=min(len(sql_tbl) * 40 + 40, 440))
+        with sq2:
+            st.markdown("**Samenvatting**")
+            for ed, count in editions.items():
+                cores = int(sql_vms[sql_vms["sql_lic_edition"] == ed]["vcpu"].sum())
+                st.write(f"**{ed}:** {count}x ({cores} cores)")
+            st.divider()
+            st.metric("Totaal cores", total_cores)
+            st.caption("Bron: Product Diensten Rapport RAM IT")
+
+
 # ─── SCOM vs vCenter mismatch ────────────────────────────────────────────────
 if FILE_MONITOR.exists():
     vcenter_vms = set(df_all["naam"].str.upper().tolist())
