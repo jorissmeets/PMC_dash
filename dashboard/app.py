@@ -14,9 +14,11 @@ import streamlit as st
 
 # ─── Configuratie ──────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent
-FILE1    = BASE_DIR / "vALL-pmc-vCenter.xlsx"
-FILE2    = BASE_DIR / "Vcenter overzicht Prinses Maxima PPD - GK d.d. 01-04-2026 v1.xlsx"
-NOW      = datetime.now()
+FILE1         = BASE_DIR / "vALL-pmc-vCenter.xlsx"
+FILE2         = BASE_DIR / "Vcenter overzicht Prinses Maxima PPD - GK d.d. 01-04-2026 v1.xlsx"
+FILE_MONITOR  = BASE_DIR / "7 x 24 Prinses Maxima Details Windows servers (SCOM vs VMware).xlsx"
+FILE_SQL_LIC  = BASE_DIR / "Sql licenties via RAM-IT - Princes Maxima.xlsx"
+NOW           = datetime.now()
 
 BACKUP_WARN_DAYS = 2
 REBOOT_WARN_DAYS = 90
@@ -85,6 +87,30 @@ def load_data():
     tools_map = {r["VM"]: r for _, r in df_tools.iterrows()}
     host_map  = {r["Host"]: r for _, r in df_host.iterrows()}
     snap_vms  = set(df_snap[df_snap["Name"] != "VEEAM BACKUP TEMPORARY SNAPSHOT"]["VM"].tolist())
+
+    # ── 24x7 Monitoring (SCOM/Nagios) ────────────────────────────────────────
+    monitor_map = {}
+    if FILE_MONITOR.exists():
+        df_mon = pd.read_excel(FILE_MONITOR, sheet_name="Export", engine="openpyxl")
+        for _, r in df_mon.iterrows():
+            server = str(r.get("Server", "") or "")
+            mon_type = str(r.get(df_mon.columns[3], "") or "") if len(df_mon.columns) > 3 else "SCOM"
+            if server:
+                short = server.split(".")[0].upper()
+                monitor_map[short] = {"type": mon_type, "functie": str(r.get("Functie server", "") or "")}
+
+    # ── SQL licenties ────────────────────────────────────────────────────────
+    sql_lic_map = {}
+    if FILE_SQL_LIC.exists():
+        df_sql = pd.read_excel(FILE_SQL_LIC, sheet_name="Export", engine="openpyxl")
+        for _, r in df_sql.iterrows():
+            contract = str(r.get("Contract", "") or "")
+            vm = str(r.get("Virtual Machine", "") or "")
+            if vm and contract not in ("Total", "None", "") and vm != "None":
+                sql_lic_map[vm.upper()] = {
+                    "edition": str(r.get("SQLEdition", "") or ""),
+                    "version": str(r.get("SQLVersion", "") or ""),
+                }
 
     # Partitie-aggregatie per VM
     part_map = {}
@@ -209,6 +235,10 @@ def load_data():
             "cpu_pct":           cpu_map.get(vm, {}).get("cpu_pct"),
             "health_messages":   health_map.get(vm, []),
             "nics":              nic_map.get(vm, []),
+            "monitoring_type":   monitor_map.get(vm.upper(), {}).get("type", ""),
+            "monitoring_functie": monitor_map.get(vm.upper(), {}).get("functie", ""),
+            "sql_lic_edition":   sql_lic_map.get(vm.upper(), {}).get("edition", ""),
+            "sql_lic_version":   sql_lic_map.get(vm.upper(), {}).get("version", ""),
         })
 
     df1 = pd.DataFrame(records)
@@ -287,6 +317,10 @@ def load_data():
             "cpu_pct":           None,
             "health_messages":   [],
             "nics":              [],
+            "monitoring_type":   monitor_map.get(str(r.get("VM", "")).upper(), {}).get("type", ""),
+            "monitoring_functie": monitor_map.get(str(r.get("VM", "")).upper(), {}).get("functie", ""),
+            "sql_lic_edition":   sql_lic_map.get(str(r.get("VM", "")).upper(), {}).get("edition", ""),
+            "sql_lic_version":   sql_lic_map.get(str(r.get("VM", "")).upper(), {}).get("version", ""),
         })
 
     df2 = pd.DataFrame(records2)
@@ -461,19 +495,21 @@ st.markdown(f"""
 
 
 # ─── KPI Cards ────────────────────────────────────────────────────────────────
-k1, k2, k3, k4, k5 = st.columns(5)
+k1, k2, k3, k4, k5, k6 = st.columns(6)
 total    = len(df)
 aan      = (df["status"] == "poweredOn").sum()
 uit      = (df["status"] == "poweredOff").sum()
 bk_ja    = (df["backup_flag"] == "Ja").sum()
 bk_pct   = round(bk_ja / total * 100) if total else 0
 tools_is = ((df["tools_status"] != "toolsOk") & (df["tools_status"] != "toolsOnbekend")).sum()
+mon_count = (df["monitoring_type"] != "").sum()
 
 k1.metric("Totaal servers",     total)
 k2.metric("Aan",                aan,   delta=f"{round(aan/total*100)}%" if total else None)
 k3.metric("Uit",                uit,   delta=f"-{uit}" if uit else None, delta_color="inverse")
-k4.metric("Backup geconfigureerd", f"{bk_pct}%", delta=f"{bk_ja}/{total}")
-k5.metric("Tools aandacht",     tools_is, delta="OK" if tools_is == 0 else f"{tools_is} VMs", delta_color="inverse" if tools_is > 0 else "normal")
+k4.metric("Backup",             f"{bk_pct}%", delta=f"{bk_ja}/{total}")
+k5.metric("24x7 monitoring",    mon_count, delta=f"{mon_count}/{total}")
+k6.metric("Tools aandacht",     tools_is, delta="OK" if tools_is == 0 else f"{tools_is} VMs", delta_color="inverse" if tools_is > 0 else "normal")
 
 
 st.divider()
@@ -587,8 +623,9 @@ if show_alerts:
     mem_swap     = df[(df["mem_swapped"].notna()) & ((df["mem_swapped"] > 0) | (df["mem_ballooned"] > 0))]
     cpu_high     = df[(df["cpu_pct"].notna()) & (df["cpu_pct"] > 90)]
     health_warns = df[df["health_messages"].apply(lambda x: len(x) > 0 if isinstance(x, list) else False)]
+    no_monitor   = df[(df["monitoring_type"] == "") & (df["status"] == "poweredOn")]
 
-    total_alerts = len(no_backup) + len(stale_backup) + len(tools_bad) + len(disk_low) + len(mem_swap) + len(cpu_high)
+    total_alerts = len(no_backup) + len(stale_backup) + len(tools_bad) + len(disk_low) + len(mem_swap) + len(cpu_high) + len(no_monitor)
 
     with st.expander(f"⚠️ Aandachtspunten ({total_alerts} items)", expanded=total_alerts > 0):
         a1, a2, a3 = st.columns(3)
@@ -639,6 +676,11 @@ if show_alerts:
                 st.markdown(f'<div class="info-box"><strong>⚕️ {len(health_warns)} VMs met health waarschuwingen</strong><br>' +
                             "<br>".join(f"• {r['naam']}" for _, r in health_warns.head(8).iterrows()) + "</div>",
                             unsafe_allow_html=True)
+            if not no_monitor.empty:
+                st.markdown(f'<div class="warn-box"><strong>📡 {len(no_monitor)} actieve VMs zonder 24x7 monitoring</strong><br>' +
+                            "<br>".join(f"• {r['naam']}" for _, r in no_monitor.head(10).iterrows()) +
+                            (f"<br>…en {len(no_monitor)-10} meer" if len(no_monitor) > 10 else "") + "</div>",
+                            unsafe_allow_html=True)
 
 
 st.divider()
@@ -659,6 +701,15 @@ def fmt_tools(s):
 
 def fmt_backup(f):
     return "✅ Ja" if f == "Ja" else "❌ Nee"
+
+def fmt_monitoring(t):
+    if not t or t == "":
+        return "–"
+    if t == "SCOM":
+        return "🟣 SCOM"
+    if t == "Nagios":
+        return "🔵 Nagios"
+    return t
 
 def fmt_pct(val, thresholds_green, thresholds_orange):
     """Badge voor percentages. thresholds in 'lager is slechter' modus (schijf) of 'hoger is slechter' modus (CPU/RAM)."""
@@ -707,48 +758,50 @@ def fmt_date(dt):
 
 df_display = df[[
     "naam", "status", "locatie", "beheerder", "os",
-    "tools_status", "update_moment", "laatste_reboot", "backup_flag", "backup_datum",
+    "tools_status", "monitoring_type", "update_moment", "laatste_reboot", "backup_flag", "backup_datum",
     "ip_adres", "vcpu", "geheugen_gib", "min_free_pct", "cpu_pct", "mem_pct",
     "sql_versie", "ha_beschermd", "functie"
 ]].copy()
 
-df_display["status"]         = df_display["status"].map(fmt_status)
-df_display["tools_status"]   = df_display["tools_status"].map(fmt_tools)
-df_display["backup_flag"]    = df_display["backup_flag"].map(fmt_backup)
-df_display["backup_datum"]   = df["backup_datum"].apply(fmt_date)
-df_display["laatste_reboot"] = df["laatste_reboot"].apply(fmt_date)
-df_display["ha_beschermd"]   = df_display["ha_beschermd"].map({True: "✅ HA", False: "–"})
-df_display["geheugen_gib"]   = df_display["geheugen_gib"].apply(lambda x: f"{x} GB")
-df_display["min_free_pct"]   = df["min_free_pct"].apply(fmt_disk_pct)
-df_display["cpu_pct"]        = df["cpu_pct"].apply(fmt_cpu_pct)
-df_display["mem_pct"]        = df["mem_pct"].apply(fmt_ram_pct)
-df_display["vcpu_ram"]       = df.apply(lambda r: f"{r['vcpu']} vCPU / {r['geheugen_gib']} GB", axis=1) if not df.empty else pd.Series([], dtype=str)
+df_display["status"]           = df_display["status"].map(fmt_status)
+df_display["tools_status"]     = df_display["tools_status"].map(fmt_tools)
+df_display["monitoring_type"]  = df_display["monitoring_type"].apply(fmt_monitoring)
+df_display["backup_flag"]      = df_display["backup_flag"].map(fmt_backup)
+df_display["backup_datum"]     = df["backup_datum"].apply(fmt_date)
+df_display["laatste_reboot"]   = df["laatste_reboot"].apply(fmt_date)
+df_display["ha_beschermd"]     = df_display["ha_beschermd"].map({True: "✅ HA", False: "–"})
+df_display["geheugen_gib"]     = df_display["geheugen_gib"].apply(lambda x: f"{x} GB")
+df_display["min_free_pct"]     = df["min_free_pct"].apply(fmt_disk_pct)
+df_display["cpu_pct"]          = df["cpu_pct"].apply(fmt_cpu_pct)
+df_display["mem_pct"]          = df["mem_pct"].apply(fmt_ram_pct)
+df_display["vcpu_ram"]         = df.apply(lambda r: f"{r['vcpu']} vCPU / {r['geheugen_gib']} GB", axis=1) if not df.empty else pd.Series([], dtype=str)
 
 col_rename = {
-    "naam":           "Naam",
-    "status":         "Status",
-    "locatie":        "Locatie",
-    "beheerder":      "Beheerder",
-    "os":             "Besturingssysteem",
-    "tools_status":   "VMware Tools",
-    "update_moment":  "Patch Schema",
-    "laatste_reboot": "Laatste Reboot",
-    "backup_flag":    "Backup",
-    "backup_datum":   "Laatste Backup",
-    "ip_adres":       "IP Adres",
-    "vcpu":           "vCPU",
-    "geheugen_gib":   "RAM",
-    "min_free_pct":   "Schijf Vrij",
-    "cpu_pct":        "CPU",
-    "mem_pct":        "RAM %",
-    "sql_versie":     "SQL Versie",
-    "ha_beschermd":   "HA",
-    "functie":        "Functie",
+    "naam":             "Naam",
+    "status":           "Status",
+    "locatie":          "Locatie",
+    "beheerder":        "Beheerder",
+    "os":               "Besturingssysteem",
+    "tools_status":     "VMware Tools",
+    "monitoring_type":  "24x7",
+    "update_moment":    "Patch Schema",
+    "laatste_reboot":   "Laatste Reboot",
+    "backup_flag":      "Backup",
+    "backup_datum":     "Laatste Backup",
+    "ip_adres":         "IP Adres",
+    "vcpu":             "vCPU",
+    "geheugen_gib":     "RAM",
+    "min_free_pct":     "Schijf Vrij",
+    "cpu_pct":          "CPU",
+    "mem_pct":          "RAM %",
+    "sql_versie":       "SQL Versie",
+    "ha_beschermd":     "HA",
+    "functie":          "Functie",
 }
 
 df_show = df_display[[
     "naam", "status", "locatie", "beheerder", "os",
-    "tools_status", "min_free_pct", "cpu_pct", "mem_pct",
+    "tools_status", "monitoring_type", "min_free_pct", "cpu_pct", "mem_pct",
     "update_moment", "laatste_reboot",
     "backup_flag", "backup_datum", "ip_adres",
     "vcpu", "geheugen_gib", "sql_versie", "ha_beschermd", "functie"
@@ -769,6 +822,7 @@ event = st.dataframe(
         "Besturingssysteem": st.column_config.TextColumn("OS", width="large"),
         "VMware Tools":      st.column_config.TextColumn("VMware Tools", width="medium"),
         "IP Adres":          st.column_config.TextColumn("IP Adres", width="small"),
+        "24x7":              st.column_config.TextColumn("24x7", width="small"),
         "Schijf Vrij":       st.column_config.TextColumn("Schijf", width="small"),
         "CPU":               st.column_config.TextColumn("CPU", width="small"),
         "RAM %":             st.column_config.TextColumn("RAM %", width="small"),
@@ -830,7 +884,9 @@ if show_details:
                     st.write("**RAM gebruik:** –")
                 st.write(f"**OS:** {vm['os'] or '–'}")
                 st.write(f"**Kernel:** {vm['kernel_versie'] or '–'}")
-                if vm['sql_versie']:
+                if vm['sql_lic_edition']:
+                    st.write(f"**SQL Licentie:** {vm['sql_lic_version']} ({vm['sql_lic_edition']})")
+                elif vm['sql_versie']:
                     st.write(f"**SQL:** {vm['sql_versie']} ({vm['sql_editie']})")
                 st.write(f"**HA Beschermd:** {'✅ Ja' if vm['ha_beschermd'] else '❌ Nee'}")
 
@@ -898,7 +954,16 @@ if show_details:
                 st.write(f"**Tools Status:** {fmt_tools(vm['tools_status'])}")
                 st.write(f"**Tools Versie:** {vm['tools_versie'] or '–'}")
                 st.write(f"**Upgradeable:** {vm['tools_upgradeable'] or '–'}")
-                st.write(f"**Alarmering:** {vm['alarmering'] or '–'}")
+                st.divider()
+                st.markdown("**24x7 Monitoring**")
+                if vm['monitoring_type']:
+                    st.write(f"**Type:** {fmt_monitoring(vm['monitoring_type'])}")
+                    if vm['monitoring_functie']:
+                        st.write(f"**Functie (monitoring):** {vm['monitoring_functie']}")
+                else:
+                    st.write("**Type:** – Geen 24x7 monitoring")
+                if vm['alarmering']:
+                    st.write(f"**Alarmering (vCenter):** {vm['alarmering']}")
                 if vm['heeft_snapshot']:
                     st.warning("⚠️ Deze VM heeft een actieve snapshot")
             with t2:
