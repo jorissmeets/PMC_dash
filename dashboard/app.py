@@ -512,6 +512,30 @@ k5.metric("24x7 monitoring",    mon_count, delta=f"{mon_count}/{total}")
 k6.metric("Tools aandacht",     tools_is, delta="OK" if tools_is == 0 else f"{tools_is} VMs", delta_color="inverse" if tools_is > 0 else "normal")
 
 
+# ─── Management samenvatting ───────────────────────────────────────────────────
+summary_items = []
+no_bk = (df["backup_flag"] == "Nee").sum()
+no_mon = ((df["monitoring_type"] == "") & (df["status"] == "poweredOn")).sum()
+stale_bk = ((df["backup_flag"] == "Ja") & (df["dagen_backup"].notna()) & (df["dagen_backup"] > BACKUP_WARN_DAYS)).sum()
+disk_crit = ((df["min_free_pct"].notna()) & (df["min_free_pct"] < 15)).sum()
+tools_att = ((df["tools_status"] != "toolsOk") & (df["tools_status"] != "toolsOnbekend")).sum()
+
+if no_bk:       summary_items.append(f"⛔ **{no_bk}** servers zonder backup")
+if stale_bk:    summary_items.append(f"⏰ **{stale_bk}** servers met verlopen backup (>{BACKUP_WARN_DAYS} dagen)")
+if no_mon:      summary_items.append(f"📡 **{no_mon}** actieve servers zonder 24x7 monitoring")
+if disk_crit:   summary_items.append(f"💾 **{disk_crit}** servers met schijfruimte < 15%")
+if tools_att:   summary_items.append(f"🔧 **{tools_att}** servers met VMware Tools aandacht")
+
+if summary_items:
+    st.markdown(f"""
+    <div style="background:linear-gradient(135deg,#5b2882 0%,#3d5a9e 50%,#4a8fd9 100%);padding:16px 24px;border-radius:10px;margin:8px 0 16px 0">
+      <div style="color:rgba(255,255,255,0.7);font-size:10px;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">Samenvatting aandachtspunten</div>
+      <div style="color:white;font-size:14px;line-height:1.8">{'&nbsp;&nbsp;·&nbsp;&nbsp;'.join(summary_items)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    st.success("✅ Geen aandachtspunten — alle servers in goede staat")
+
 st.divider()
 
 
@@ -687,7 +711,23 @@ st.divider()
 
 
 # ─── Tabel ─────────────────────────────────────────────────────────────────────
-st.markdown(f"### Servers ({len(df)})")
+tbl_header_col, tbl_export_col = st.columns([3, 1])
+with tbl_header_col:
+    st.markdown(f"### Servers ({len(df)})")
+with tbl_export_col:
+    if not df.empty:
+        export_cols = ["naam","status","locatie","beheerder","os","monitoring_type","tools_status",
+                       "min_free_pct","cpu_pct","mem_pct","backup_flag","backup_datum","ip_adres",
+                       "vcpu","geheugen_gib","sql_versie","sql_lic_edition","sql_lic_version","functie"]
+        df_export = df[[c for c in export_cols if c in df.columns]].copy()
+        df_export["backup_datum"] = df["backup_datum"].apply(lambda d: d.strftime("%d-%m-%Y %H:%M") if d and not pd.isna(d) else "" if not isinstance(d, str) else d)
+        buf = __import__("io").BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            df_export.to_excel(writer, index=False, sheet_name="Servers")
+        st.download_button("📥 Export Excel", data=buf.getvalue(),
+                           file_name=f"PMC_servers_{NOW.strftime('%Y%m%d')}.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           use_container_width=True)
 
 # Tabel opmaken voor weergave
 def fmt_status(s):
@@ -833,6 +873,46 @@ event = st.dataframe(
         "Functie":           st.column_config.TextColumn("Functie", width="medium"),
     }
 )
+
+
+# ─── SCOM vs vCenter mismatch ──────────────────────────────────────────────────
+if FILE_MONITOR.exists():
+    vcenter_vms = set(df_all["naam"].str.upper().tolist())
+    monitor_vms_set = set()
+    df_mon_check = pd.read_excel(FILE_MONITOR, sheet_name="Export", engine="openpyxl")
+    monitor_details = {}
+    for _, r in df_mon_check.iterrows():
+        server = str(r.get("Server", "") or "")
+        if server:
+            short = server.split(".")[0].upper()
+            monitor_vms_set.add(short)
+            monitor_details[short] = {"fqdn": server, "functie": str(r.get("Functie server", "") or "")}
+
+    in_scom_not_vcenter = monitor_vms_set - vcenter_vms
+    in_vcenter_not_scom = vcenter_vms - monitor_vms_set
+    # Filter: alleen poweredOn servers die niet in monitoring staan
+    powered_on_no_scom = [vm for vm in df_all[df_all["status"] == "poweredOn"]["naam"].tolist() if vm.upper() in in_vcenter_not_scom]
+
+    if in_scom_not_vcenter or powered_on_no_scom:
+        with st.expander(f"🔍 SCOM/Nagios vs vCenter vergelijking ({len(in_scom_not_vcenter) + len(powered_on_no_scom)} mismatches)", expanded=False):
+            m1, m2 = st.columns(2)
+            with m1:
+                if in_scom_not_vcenter:
+                    st.markdown(f"**In SCOM/Nagios maar niet in vCenter ({len(in_scom_not_vcenter)}):**")
+                    for s in sorted(in_scom_not_vcenter):
+                        detail = monitor_details.get(s, {})
+                        st.write(f"• {detail.get('fqdn', s)} — {detail.get('functie', '')}")
+                else:
+                    st.success("✅ Alle SCOM/Nagios servers staan in vCenter")
+            with m2:
+                if powered_on_no_scom:
+                    st.markdown(f"**Actief in vCenter maar geen 24x7 monitoring ({len(powered_on_no_scom)}):**")
+                    for s in sorted(powered_on_no_scom)[:15]:
+                        st.write(f"• {s}")
+                    if len(powered_on_no_scom) > 15:
+                        st.write(f"…en {len(powered_on_no_scom) - 15} meer")
+                else:
+                    st.success("✅ Alle actieve servers hebben 24x7 monitoring")
 
 
 # ─── Detailpaneel ──────────────────────────────────────────────────────────────
