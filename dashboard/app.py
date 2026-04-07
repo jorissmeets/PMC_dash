@@ -614,7 +614,7 @@ with tbl_r:
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
 def _s(s):  return {"poweredOn":"✅","poweredOff":"❌","suspended":"⏸"}.get(s,s)
-def _m(t):  return {"SCOM":"SCOM","Nagios":"Nagios"}.get(t,"–") if t else "–"
+def _m(t):  return {"SCOM":"🟣 SCOM","Nagios":"🔵 Nagios"}.get(t,"–") if t else "–"
 def _d(v):
     if v is None or (isinstance(v,float) and pd.isna(v)): return "–"
     v=int(v); return f"{'🔴' if v<15 else '🟠' if v<30 else '🟢'}{v}%"
@@ -748,7 +748,7 @@ if selected_rows:
             st.write(f"**Versie:** {vm['tools_versie'] or '–'} · **Upgrade:** {vm['tools_upgradeable'] or '–'}")
             if vm['heeft_snapshot']: st.warning("Actieve snapshot")
         with t2:
-            st.write(f"**24x7:** {vm['monitoring_type'] or 'Geen monitoring'}")
+            st.write(f"**24x7:** {_m(vm['monitoring_type'])}")
             if vm['monitoring_functie']: st.write(f"**Registratie:** {vm['monitoring_functie']}")
             health = vm['health_messages'] if isinstance(vm['health_messages'],list) else []
             for msg in health: st.warning(msg)
