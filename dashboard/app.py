@@ -404,25 +404,34 @@ df_all = load_data()
 RISK_HIGH_THRESHOLD = 5
 
 def calc_risk(r):
-    """Risicoscore op schaal 0-10. Retourneert (score, breakdown_tekst)."""
+    """Risicoscore op schaal 0-10. Retourneert (score, breakdown_tekst).
+    Weging: backup 3, schijf 3, tools 2, reboot 1(+1), monitoring 1 = max 10.
+    Exclusieve condities: backup ontbreekt OF verlopen (nooit beide), schijf <15 OF 15-30 (nooit beide)."""
     score = 0
     parts = []
     if r["status"] == "poweredOn":
+        # Backup: 0 of 2 of 3 (exclusief)
         if r["backup_flag"] == "Nee":
             score += 3; parts.append("Geen backup (+3)")
-        if r["dagen_backup"] is not None and r["dagen_backup"] > BACKUP_WARN_DAYS and r["backup_flag"] == "Ja":
+        elif r["dagen_backup"] is not None and r["dagen_backup"] > BACKUP_WARN_DAYS:
             score += 2; parts.append(f"Backup verlopen {int(r['dagen_backup'])}d (+2)")
+        # Schijf: 0 of 1 of 3 (exclusief)
         if r["min_free_pct"] is not None and r["min_free_pct"] < 15:
             score += 3; parts.append(f"Schijf {int(r['min_free_pct'])}% (+3)")
         elif r["min_free_pct"] is not None and r["min_free_pct"] < 30:
             score += 1; parts.append(f"Schijf {int(r['min_free_pct'])}% (+1)")
+        # Tools: 0 of 2
         if r["tools_status"] in ("toolsOld","toolsNotRunning","toolsNotInstalled"):
-            score += 1; parts.append("VMware Tools (+1)")
-        if r["dagen_reboot"] is not None and r["dagen_reboot"] > REBOOT_WARN_DAYS:
+            score += 2; parts.append("VMware Tools (+2)")
+        # Reboot: 0 of 1 of 2 (exclusief)
+        if r["dagen_reboot"] is not None and r["dagen_reboot"] > 365:
+            score += 2; parts.append(f"Reboot {int(r['dagen_reboot'])}d (+2)")
+        elif r["dagen_reboot"] is not None and r["dagen_reboot"] > REBOOT_WARN_DAYS:
             score += 1; parts.append(f"Reboot {int(r['dagen_reboot'])}d (+1)")
+        # Monitoring: 0 of 1
         if r["monitoring_type"] == "":
             score += 1; parts.append("Geen monitoring (+1)")
-    return min(score, 10), " | ".join(parts) if parts else "Geen risico's"
+    return score, " | ".join(parts) if parts else "Geen risico's"
 
 risk_results = df_all.apply(calc_risk, axis=1, result_type="expand")
 risk_results.columns = ["risico", "risico_detail"]
