@@ -401,19 +401,33 @@ st.markdown("""
 df_all = load_data()
 
 # ─── Risicoscore berekenen ───────────────────────────────────────────────────
-def calc_risk(r):
-    score = 0
-    if r["status"] == "poweredOn":
-        if r["backup_flag"] == "Nee": score += 4
-        if r["dagen_backup"] is not None and r["dagen_backup"] > BACKUP_WARN_DAYS and r["backup_flag"] == "Ja": score += 3
-        if r["min_free_pct"] is not None and r["min_free_pct"] < 15: score += 4
-        elif r["min_free_pct"] is not None and r["min_free_pct"] < 30: score += 2
-        if r["tools_status"] in ("toolsOld","toolsNotRunning","toolsNotInstalled"): score += 2
-        if r["dagen_reboot"] is not None and r["dagen_reboot"] > REBOOT_WARN_DAYS: score += 1
-        if r["monitoring_type"] == "": score += 1
-    return score
+RISK_HIGH_THRESHOLD = 5
 
-df_all["risico"] = df_all.apply(calc_risk, axis=1)
+def calc_risk(r):
+    """Risicoscore op schaal 0-10. Retourneert (score, breakdown_tekst)."""
+    score = 0
+    parts = []
+    if r["status"] == "poweredOn":
+        if r["backup_flag"] == "Nee":
+            score += 3; parts.append("Geen backup (+3)")
+        if r["dagen_backup"] is not None and r["dagen_backup"] > BACKUP_WARN_DAYS and r["backup_flag"] == "Ja":
+            score += 2; parts.append(f"Backup verlopen {int(r['dagen_backup'])}d (+2)")
+        if r["min_free_pct"] is not None and r["min_free_pct"] < 15:
+            score += 3; parts.append(f"Schijf {int(r['min_free_pct'])}% (+3)")
+        elif r["min_free_pct"] is not None and r["min_free_pct"] < 30:
+            score += 1; parts.append(f"Schijf {int(r['min_free_pct'])}% (+1)")
+        if r["tools_status"] in ("toolsOld","toolsNotRunning","toolsNotInstalled"):
+            score += 1; parts.append("VMware Tools (+1)")
+        if r["dagen_reboot"] is not None and r["dagen_reboot"] > REBOOT_WARN_DAYS:
+            score += 1; parts.append(f"Reboot {int(r['dagen_reboot'])}d (+1)")
+        if r["monitoring_type"] == "":
+            score += 1; parts.append("Geen monitoring (+1)")
+    return min(score, 10), " | ".join(parts) if parts else "Geen risico's"
+
+risk_results = df_all.apply(calc_risk, axis=1, result_type="expand")
+risk_results.columns = ["risico", "risico_detail"]
+df_all["risico"] = risk_results["risico"]
+df_all["risico_detail"] = risk_results["risico_detail"]
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -512,14 +526,7 @@ with act_col:
     if not risk_servers.empty:
         risk_rows = []
         for _, r in risk_servers.iterrows():
-            issues = []
-            if r["backup_flag"] == "Nee" and r["status"] == "poweredOn": issues.append("Geen backup")
-            if r["dagen_backup"] is not None and r["dagen_backup"] > BACKUP_WARN_DAYS and r["backup_flag"] == "Ja": issues.append("Backup verlopen")
-            if r["min_free_pct"] is not None and r["min_free_pct"] < 15: issues.append(f"Schijf {int(r['min_free_pct'])}%")
-            elif r["min_free_pct"] is not None and r["min_free_pct"] < 30: issues.append(f"Schijf {int(r['min_free_pct'])}%")
-            if r["tools_status"] in ("toolsOld","toolsNotRunning","toolsNotInstalled"): issues.append("VMware Tools")
-            if r["dagen_reboot"] is not None and r["dagen_reboot"] > REBOOT_WARN_DAYS: issues.append(f"Reboot {int(r['dagen_reboot'])}d")
-            risk_rows.append({"Server": r["naam"], "Issues": " · ".join(issues), "Score": int(r["risico"]),
+            risk_rows.append({"Server": r["naam"], "Issues": r["risico_detail"], "Score": int(r["risico"]),
                               "Beheerder": r["beheerder"] or "–", "Locatie": r["locatie"]})
         st.dataframe(pd.DataFrame(risk_rows), use_container_width=True, hide_index=True, height=min(len(risk_rows)*38+40, 400))
     else:
@@ -568,11 +575,14 @@ with v2:
     # Top 10 risico-servers
     risk_top = df[df["risico"] > 0].nlargest(10, "risico")[["naam","risico"]].copy()
     if not risk_top.empty:
+        risk_top["detail"] = df[df["risico"]>0].nlargest(10,"risico")["risico_detail"].values[:len(risk_top)]
         fig_r = px.bar(risk_top, y="naam", x="risico", orientation="h", title="Top risico-servers",
-                       text="risico", color="risico", color_continuous_scale=["#c49a2c", "#e05a6b"], range_color=[1, 10])
+                       text="risico", hover_data={"detail": True, "risico": True, "naam": False},
+                       color="risico", color_continuous_scale=["#c49a2c", "#e05a6b"], range_color=[0, 10])
         fig_r.update_layout(margin=dict(t=40,b=0,l=0,r=0), height=220, showlegend=False,
                             title_font=dict(size=13, family="Open Sans"), font_family="Open Sans",
-                            xaxis_title="Risicoscore", yaxis_title="", coloraxis_showscale=False,
+                            xaxis_title="Risicoscore (0-10)", yaxis_title="", coloraxis_showscale=False,
+                            xaxis=dict(range=[0,10]),
                             yaxis=dict(autorange="reversed"))
         fig_r.update_traces(textposition="outside")
         st.plotly_chart(fig_r, use_container_width=True, key="v_risk")
@@ -580,19 +590,20 @@ with v2:
         st.success("Geen risico-servers")
 
 with v3:
-    # Issues per locatie
+    # Risico per locatie: hoog (>=5) vs laag (<5)
     loc_stats = []
     for loc in df["locatie"].unique():
         sub = df[df["locatie"] == loc]
-        loc_stats.append({"Locatie": loc, "Servers": len(sub), "Risico's": int((sub["risico"]>0).sum()),
-                          "Compliance": f"{round((1 - (sub['risico']>0).sum()/len(sub))*100) if len(sub) else 0}%"})
+        hoog = int((sub["risico"] >= RISK_HIGH_THRESHOLD).sum())
+        laag = len(sub) - hoog
+        loc_stats.append({"Locatie": loc, "Hoog risico": hoog, "Laag risico": laag})
     if loc_stats:
         fig_l = go.Figure()
         ls = pd.DataFrame(loc_stats)
-        fig_l.add_trace(go.Bar(name="Zonder risico", x=ls["Locatie"], y=ls["Servers"]-ls["Risico's"], marker_color="#48bb78"))
-        fig_l.add_trace(go.Bar(name="Met risico", x=ls["Locatie"], y=ls["Risico's"], marker_color="#e05a6b"))
+        fig_l.add_trace(go.Bar(name="Laag risico", x=ls["Locatie"], y=ls["Laag risico"], marker_color="#48bb78"))
+        fig_l.add_trace(go.Bar(name=f"Hoog risico (≥{RISK_HIGH_THRESHOLD})", x=ls["Locatie"], y=ls["Hoog risico"], marker_color="#e05a6b"))
         fig_l.update_layout(barmode="stack", margin=dict(t=40,b=0,l=0,r=0), height=220,
-                             title="Issues per locatie", title_font=dict(size=13, family="Open Sans"),
+                             title="Risico per locatie", title_font=dict(size=13, family="Open Sans"),
                              font_family="Open Sans", legend=dict(orientation="h", y=-0.2, font=dict(size=10)),
                              yaxis_title="Servers")
         st.plotly_chart(fig_l, use_container_width=True, key="v_loc")
@@ -623,7 +634,7 @@ def _p(v):
     v=int(v); return f"{'🔴' if v>90 else '🟠' if v>70 else '🟢'}{v}%"
 
 df_sorted = df.sort_values("risico", ascending=False)
-tbl = df_sorted[["naam","risico","status","locatie","beheerder","backup_flag","monitoring_type",
+tbl = df_sorted[["naam","risico","risico_detail","status","locatie","beheerder","backup_flag","monitoring_type",
                   "min_free_pct","cpu_pct","mem_pct","os","functie"]].copy()
 tbl["status"]          = tbl["status"].map(_s)
 tbl["backup_flag"]     = tbl["backup_flag"].map({"Ja":"✅","Nee":"❌"})
@@ -632,7 +643,7 @@ tbl["min_free_pct"]    = df_sorted["min_free_pct"].apply(_d)
 tbl["cpu_pct"]         = df_sorted["cpu_pct"].apply(_p)
 tbl["mem_pct"]         = df_sorted["mem_pct"].apply(_p)
 
-tbl = tbl.rename(columns={"naam":"Server","risico":"Risico","status":"","locatie":"Locatie",
+tbl = tbl.rename(columns={"naam":"Server","risico":"Risico","risico_detail":"Risico details","status":"","locatie":"Locatie",
     "beheerder":"Beheerder","backup_flag":"BU","monitoring_type":"24x7","min_free_pct":"Schijf",
     "cpu_pct":"CPU","mem_pct":"RAM","os":"OS","functie":"Functie"})
 
@@ -640,7 +651,8 @@ event = st.dataframe(tbl, use_container_width=True, height=500, hide_index=True,
     on_select="rerun", selection_mode="single-row",
     column_config={
         "Server": st.column_config.TextColumn(width="medium"),
-        "Risico": st.column_config.NumberColumn(width="small"),
+        "Risico": st.column_config.ProgressColumn("Risico", min_value=0, max_value=10, format="%d", width="small"),
+        "Risico details": st.column_config.TextColumn("Details", width="large", help="Breakdown van de risicoscore per server"),
         "":       st.column_config.TextColumn(width="small"),
         "Locatie":st.column_config.TextColumn(width="medium"),
         "BU":     st.column_config.TextColumn(width="small"),
