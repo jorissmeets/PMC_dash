@@ -126,12 +126,18 @@ def load_data():
         for _, r in df_r7.iterrows():
             hostname = str(r.get("AssetHostname", "") or "").split(".")[0].upper()
             if hostname:
+                def _safe_int(v):
+                    try: return int(float(v)) if pd.notna(v) else 0
+                    except: return 0
+                def _safe_float(v):
+                    try: return float(v) if pd.notna(v) else 0.0
+                    except: return 0.0
                 r7_map[hostname] = {
-                    "vuln_total": int(r.get("vuln_total", 0) or 0),
-                    "vuln_critical": int(r.get("critical", 0) or 0),
-                    "vuln_high": int(r.get("high", 0) or 0),
-                    "vuln_medium": int(r.get("medium", 0) or 0),
-                    "max_cvss": float(r.get("max_cvss", 0) or 0),
+                    "vuln_total": _safe_int(r.get("vuln_total")),
+                    "vuln_critical": _safe_int(r.get("critical")),
+                    "vuln_high": _safe_int(r.get("high")),
+                    "vuln_medium": _safe_int(r.get("medium")),
+                    "max_cvss": _safe_float(r.get("max_cvss")),
                     "last_scan": str(r.get("last_scan", "") or ""),
                 }
 
