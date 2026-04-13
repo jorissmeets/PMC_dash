@@ -611,7 +611,11 @@ with data_col:
     cov_items = []
     cov_items.append(f'<div style="padding:6px 0;border-bottom:1px solid #f0f0f0"><span style="color:#48bb78;font-weight:700">{bk_count}</span> / {total_all} servers met backup record</div>')
     cov_items.append(f'<div style="padding:6px 0;border-bottom:1px solid #f0f0f0"><span style="color:#c49a2c;font-weight:700">{mon_count}</span> / {total_all} met monitoring record <span style="color:#aaa;font-size:11px">(bron dekt alleen RAM-DC)</span></div>')
-    cov_items.append(f'<div style="padding:6px 0;border-bottom:1px solid #f0f0f0"><span style="color:#aaa;font-weight:700">0</span> / {total_all} met patchbron <span style="color:#aaa;font-size:11px">(Rapid7 nog niet gekoppeld)</span></div>')
+    r7_cov = int(df_all["r7_scanned"].sum())
+    if r7_cov > 0:
+        cov_items.append(f'<div style="padding:6px 0;border-bottom:1px solid #f0f0f0"><span style="color:#48bb78;font-weight:700">{r7_cov}</span> / {total_all} met patchbron (Rapid7)</div>')
+    else:
+        cov_items.append(f'<div style="padding:6px 0;border-bottom:1px solid #f0f0f0"><span style="color:#aaa;font-weight:700">0</span> / {total_all} met patchbron <span style="color:#aaa;font-size:11px">(Rapid7 nog niet gekoppeld)</span></div>')
     cov_items.append(f'<div style="padding:6px 0;border-bottom:1px solid #f0f0f0"><span style="color:#c49a2c;font-weight:700">{no_beh}</span> servers zonder beheerder ingevuld</div>')
     cov_items.append(f'<div style="padding:6px 0"><span style="color:#c49a2c;font-weight:700">{no_part}</span> servers zonder schijfdata <span style="color:#aaa;font-size:11px">(alleen PMC on-prem beschikbaar)</span></div>')
     st.markdown(f'<div style="background:#fafafa;border:1px solid #eee;border-radius:8px;padding:8px 14px;font-size:13px">{"".join(cov_items)}</div>', unsafe_allow_html=True)
