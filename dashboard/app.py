@@ -477,6 +477,11 @@ def calc_risk(r):
             score += 2; parts.append(f"Reboot {int(r['dagen_reboot'])}d (+2)")
         elif r["dagen_reboot"] is not None and r["dagen_reboot"] > REBOOT_WARN_DAYS:
             score += 1; parts.append(f"Reboot {int(r['dagen_reboot'])}d (+1)")
+        # Vulnerabilities: 0 of 2 of 3 (exclusief)
+        if r.get("vuln_critical", 0) > 0:
+            score += 3; parts.append(f"{int(r['vuln_critical'])} critical vulns (+3)")
+        elif r.get("vuln_high", 0) > 0:
+            score += 2; parts.append(f"{int(r['vuln_high'])} high vulns (+2)")
         # Monitoring: 0 of 1
         if r["monitoring_type"] == "":
             score += 1; parts.append("Geen monitoring (+1)")
@@ -713,17 +718,20 @@ def _v(row):
 df_sorted = df.sort_values("risico", ascending=False)
 tbl = df_sorted[["naam","risico","risico_detail","status","locatie","beheerder","backup_flag","monitoring_type",
                   "min_free_pct","cpu_pct","mem_pct","os","functie"]].copy()
+tbl["vulns"]           = df_sorted.apply(_v, axis=1)
 tbl["status"]          = tbl["status"].map(_s)
 tbl["backup_flag"]     = tbl["backup_flag"].map({"Ja":"✅","Nee":"❌"})
 tbl["monitoring_type"] = tbl["monitoring_type"].apply(_m)
 tbl["min_free_pct"]    = df_sorted["min_free_pct"].apply(_d)
 tbl["cpu_pct"]         = df_sorted["cpu_pct"].apply(_p)
 tbl["mem_pct"]         = df_sorted["mem_pct"].apply(_p)
-tbl["vulns"]           = df_sorted.apply(_v, axis=1)
 
-tbl = tbl.rename(columns={"naam":"Server","risico":"Risico","risico_detail":"Risico details","status":"","locatie":"Locatie",
+tbl = tbl.rename(columns={"naam":"Server","risico":"Risico","risico_detail":"Details","vulns":"Vulns","status":"","locatie":"Locatie",
     "beheerder":"Beheerder","backup_flag":"BU","monitoring_type":"24x7","min_free_pct":"Schijf",
-    "cpu_pct":"CPU","mem_pct":"RAM","os":"OS","functie":"Functie","vulns":"Vulns"})
+    "cpu_pct":"CPU","mem_pct":"RAM","os":"OS","functie":"Functie"})
+
+# Kolom volgorde: Vulns prominent na Risico
+tbl = tbl[["Server","Risico","Vulns","Details","","Locatie","Beheerder","BU","24x7","Schijf","CPU","RAM","OS","Functie"]]
 
 event = st.dataframe(tbl, use_container_width=True, height=500, hide_index=True,
     on_select="rerun", selection_mode="single-row",
