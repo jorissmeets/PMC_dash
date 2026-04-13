@@ -19,6 +19,7 @@ FILE1         = BASE_DIR / "vALL-pmc-vCenter.xlsx"
 FILE2         = BASE_DIR / "Vcenter overzicht Prinses Maxima PPD - GK d.d. 01-04-2026 v1.xlsx"
 FILE_MONITOR  = BASE_DIR / "7 x 24 Prinses Maxima Details Windows servers (SCOM vs VMware).xlsx"
 FILE_SQL_LIC  = BASE_DIR / "Sql licenties via RAM-IT - Princes Maxima.xlsx"
+FILE_R7_VULNS = BASE_DIR / "rapid7_vulns.csv"
 NOW           = datetime.now()
 
 BACKUP_WARN_DAYS = 2
@@ -116,6 +117,22 @@ def load_data():
                 sql_lic_map[vm.upper()] = {
                     "edition": str(r.get("SQLEdition", "") or ""),
                     "version": str(r.get("SQLVersion", "") or ""),
+                }
+
+    # ── Rapid7 vulnerability data ────────────────────────────────────────────
+    r7_map = {}
+    if FILE_R7_VULNS.exists():
+        df_r7 = pd.read_csv(FILE_R7_VULNS)
+        for _, r in df_r7.iterrows():
+            hostname = str(r.get("AssetHostname", "") or "").split(".")[0].upper()
+            if hostname:
+                r7_map[hostname] = {
+                    "vuln_total": int(r.get("vuln_total", 0) or 0),
+                    "vuln_critical": int(r.get("critical", 0) or 0),
+                    "vuln_high": int(r.get("high", 0) or 0),
+                    "vuln_medium": int(r.get("medium", 0) or 0),
+                    "max_cvss": float(r.get("max_cvss", 0) or 0),
+                    "last_scan": str(r.get("last_scan", "") or ""),
                 }
 
     # Partitie-aggregatie per VM
@@ -244,6 +261,11 @@ def load_data():
             "monitoring_functie": monitor_map.get(vm.upper(), {}).get("functie", ""),
             "sql_lic_edition":   sql_lic_map.get(vm.upper(), {}).get("edition", ""),
             "sql_lic_version":   sql_lic_map.get(vm.upper(), {}).get("version", ""),
+            "vuln_total":        r7_map.get(vm.upper(), {}).get("vuln_total", 0),
+            "vuln_critical":     r7_map.get(vm.upper(), {}).get("vuln_critical", 0),
+            "vuln_high":         r7_map.get(vm.upper(), {}).get("vuln_high", 0),
+            "max_cvss":          r7_map.get(vm.upper(), {}).get("max_cvss", 0),
+            "r7_scanned":        vm.upper() in r7_map,
         })
 
     df1 = pd.DataFrame(records)
@@ -325,6 +347,11 @@ def load_data():
             "monitoring_functie": monitor_map.get(str(r.get("VM", "")).upper(), {}).get("functie", ""),
             "sql_lic_edition":   sql_lic_map.get(str(r.get("VM", "")).upper(), {}).get("edition", ""),
             "sql_lic_version":   sql_lic_map.get(str(r.get("VM", "")).upper(), {}).get("version", ""),
+            "vuln_total":        r7_map.get(str(r.get("VM", "")).upper(), {}).get("vuln_total", 0),
+            "vuln_critical":     r7_map.get(str(r.get("VM", "")).upper(), {}).get("vuln_critical", 0),
+            "vuln_high":         r7_map.get(str(r.get("VM", "")).upper(), {}).get("vuln_high", 0),
+            "max_cvss":          r7_map.get(str(r.get("VM", "")).upper(), {}).get("max_cvss", 0),
+            "r7_scanned":        str(r.get("VM", "")).upper() in r7_map,
         })
 
     df2 = pd.DataFrame(records2)
@@ -499,11 +526,14 @@ bk_count  = int((df_all["backup_flag"] == "Ja").sum())
 mon_count = int((df_all["monitoring_type"] != "").sum())
 total_all = len(df_all)
 
+r7_scanned_count = int(df_all["r7_scanned"].sum())
+r7_has_data = FILE_R7_VULNS.exists()
 src_items = [
     ("vCenter",     f"{total_all}/{total_all} geladen",    "src-green"),
     ("Backup",      f"{bk_count}/{total_all} dekking",     "src-green" if bk_count == total_all else "src-orange"),
     ("24x7 Monitoring", f"{mon_count}/{total_all} gedekt (alleen RAM-DC)", "src-orange"),
-    ("Rapid7",      "Nog niet gekoppeld",                  "src-grey"),
+    ("Rapid7",      f"{r7_scanned_count}/{total_all} gescand" if r7_has_data else "Nog niet gekoppeld",
+                    "src-orange" if r7_has_data and r7_scanned_count < total_all else ("src-green" if r7_has_data else "src-grey")),
     ("TopDesk",     "Nog niet gekoppeld",                  "src-grey"),
 ]
 pills = " ".join(f'<span class="src-pill {cls}">{name}: {txt}</span>' for name, txt, cls in src_items)
@@ -521,7 +551,13 @@ k1.metric("Servers in scope",        total)
 k2.metric("Backup compliant",        f"{int((df['backup_flag'] == 'Ja').sum())}/{total}")
 k3.metric("24x7 monitoring gedekt",  f"{int((df['monitoring_type'] != '').sum())}/{total}")
 k4.metric("Schijfruimte kritiek",    len(disk_crit), delta="servers <15% vrij" if len(disk_crit) else "OK", delta_color="inverse" if len(disk_crit) else "normal")
-k5.metric("Patch compliant",         "–",  delta="Bron ontbreekt (Rapid7)")
+r7_clean = int(((df["r7_scanned"]) & (df["vuln_critical"] == 0) & (df["vuln_high"] == 0)).sum())
+r7_total = int(df["r7_scanned"].sum())
+if r7_total > 0:
+    k5.metric("Patch compliant", f"{r7_clean}/{r7_total}", delta=f"{r7_total - r7_clean} met kwetsbaarheden" if r7_clean < r7_total else "alles OK",
+              delta_color="inverse" if r7_clean < r7_total else "normal")
+else:
+    k5.metric("Patch compliant", "–", delta="Rapid7 bron ontbreekt")
 k6.metric("Open risico's",           risk_count, delta="servers met score >0" if risk_count else "alles OK", delta_color="inverse" if risk_count else "normal")
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -562,11 +598,14 @@ v1, v2, v3 = st.columns(3)
 
 with v1:
     # Compliance per domein — stacked horizontal bars
+    r7_ok   = int(((df["r7_scanned"]) & (df["vuln_critical"]==0) & (df["vuln_high"]==0)).sum())
+    r7_bad  = int(((df["r7_scanned"]) & ((df["vuln_critical"]>0) | (df["vuln_high"]>0))).sum())
+    r7_miss = int((~df["r7_scanned"]).sum())
     domains = ["Backup", "Monitoring", "Schijf", "Patching"]
     compliant = [int((df["backup_flag"]=="Ja").sum()), int((df["monitoring_type"]!="").sum()),
-                 int(((df["min_free_pct"].isna()) | (df["min_free_pct"]>=15)).sum()) - int(df["min_free_pct"].isna().sum()), 0]
-    missing   = [0, 0, int(df["min_free_pct"].isna().sum()), total]
-    non_comp  = [int((df["backup_flag"]=="Nee").sum()), 0, int(((df["min_free_pct"].notna()) & (df["min_free_pct"]<15)).sum()), 0]
+                 int(((df["min_free_pct"].isna()) | (df["min_free_pct"]>=15)).sum()) - int(df["min_free_pct"].isna().sum()), r7_ok]
+    missing   = [0, 0, int(df["min_free_pct"].isna().sum()), r7_miss]
+    non_comp  = [int((df["backup_flag"]=="Nee").sum()), 0, int(((df["min_free_pct"].notna()) & (df["min_free_pct"]<15)).sum()), r7_bad]
     # monitoring non-compliant is 0 because missing data, not a failure
     missing[1] = total - int((df["monitoring_type"]!="").sum())
 
@@ -642,6 +681,13 @@ def _p(v):
     if v is None or (isinstance(v,float) and pd.isna(v)): return "–"
     v=int(v); return f"{'🔴' if v>90 else '🟠' if v>70 else '🟢'}{v}%"
 
+def _v(row):
+    if not row.get("r7_scanned"): return "–"
+    c, h = int(row.get("vuln_critical", 0)), int(row.get("vuln_high", 0))
+    if c > 0: return f"🔴 {c}C {h}H"
+    if h > 0: return f"🟠 {h}H"
+    return "🟢 OK"
+
 df_sorted = df.sort_values("risico", ascending=False)
 tbl = df_sorted[["naam","risico","risico_detail","status","locatie","beheerder","backup_flag","monitoring_type",
                   "min_free_pct","cpu_pct","mem_pct","os","functie"]].copy()
@@ -651,10 +697,11 @@ tbl["monitoring_type"] = tbl["monitoring_type"].apply(_m)
 tbl["min_free_pct"]    = df_sorted["min_free_pct"].apply(_d)
 tbl["cpu_pct"]         = df_sorted["cpu_pct"].apply(_p)
 tbl["mem_pct"]         = df_sorted["mem_pct"].apply(_p)
+tbl["vulns"]           = df_sorted.apply(_v, axis=1)
 
 tbl = tbl.rename(columns={"naam":"Server","risico":"Risico","risico_detail":"Risico details","status":"","locatie":"Locatie",
     "beheerder":"Beheerder","backup_flag":"BU","monitoring_type":"24x7","min_free_pct":"Schijf",
-    "cpu_pct":"CPU","mem_pct":"RAM","os":"OS","functie":"Functie"})
+    "cpu_pct":"CPU","mem_pct":"RAM","os":"OS","functie":"Functie","vulns":"Vulns"})
 
 event = st.dataframe(tbl, use_container_width=True, height=500, hide_index=True,
     on_select="rerun", selection_mode="single-row",
@@ -666,6 +713,7 @@ event = st.dataframe(tbl, use_container_width=True, height=500, hide_index=True,
         "Locatie":st.column_config.TextColumn(width="medium"),
         "BU":     st.column_config.TextColumn(width="small"),
         "24x7":   st.column_config.TextColumn(width="small"),
+        "Vulns":  st.column_config.TextColumn("Vulns", width="small", help="Rapid7: C=Critical H=High"),
         "Schijf": st.column_config.TextColumn(width="small"),
         "CPU":    st.column_config.TextColumn(width="small"),
         "RAM":    st.column_config.TextColumn(width="small"),
