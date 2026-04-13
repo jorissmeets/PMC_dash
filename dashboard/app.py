@@ -19,7 +19,8 @@ FILE1         = BASE_DIR / "vALL-pmc-vCenter.xlsx"
 FILE2         = BASE_DIR / "Vcenter overzicht Prinses Maxima PPD - GK d.d. 01-04-2026 v1.xlsx"
 FILE_MONITOR  = BASE_DIR / "7 x 24 Prinses Maxima Details Windows servers (SCOM vs VMware).xlsx"
 FILE_SQL_LIC  = BASE_DIR / "Sql licenties via RAM-IT - Princes Maxima.xlsx"
-FILE_R7_VULNS = BASE_DIR / "rapid7_vulns.csv"
+FILE_R7_VULNS  = BASE_DIR / "rapid7_vulns.csv"
+FILE_R7_ASSETS = BASE_DIR / "rapid7_assets.csv"
 NOW           = datetime.now()
 
 BACKUP_WARN_DAYS = 2
@@ -119,19 +120,34 @@ def load_data():
                     "version": str(r.get("SQLVersion", "") or ""),
                 }
 
-    # ── Rapid7 vulnerability data ────────────────────────────────────────────
+    # ── Rapid7 vulnerability + asset data ────────────────────────────────────
+    def _safe_int(v):
+        try: return int(float(v)) if pd.notna(v) else 0
+        except: return 0
+    def _safe_float(v):
+        try: return float(v) if pd.notna(v) else 0.0
+        except: return 0.0
+
     r7_map = {}
+    r7_scanned_hosts = set()
+
+    # Assets tabel: alle gescande hosts (ook zonder vulns)
+    if FILE_R7_ASSETS.exists():
+        df_r7a = pd.read_csv(FILE_R7_ASSETS)
+        for _, r in df_r7a.iterrows():
+            hostname = str(r.get("Hostname", "") or "").split(".")[0].upper()
+            if hostname and hostname != "ONBEKEND":
+                r7_scanned_hosts.add(hostname)
+                r7_map[hostname] = {"vuln_total": 0, "vuln_critical": 0, "vuln_high": 0,
+                                    "vuln_medium": 0, "max_cvss": 0.0, "last_scan": ""}
+
+    # Vulns tabel: overschrijf met echte vuln data
     if FILE_R7_VULNS.exists():
         df_r7 = pd.read_csv(FILE_R7_VULNS)
         for _, r in df_r7.iterrows():
             hostname = str(r.get("AssetHostname", "") or "").split(".")[0].upper()
             if hostname:
-                def _safe_int(v):
-                    try: return int(float(v)) if pd.notna(v) else 0
-                    except: return 0
-                def _safe_float(v):
-                    try: return float(v) if pd.notna(v) else 0.0
-                    except: return 0.0
+                r7_scanned_hosts.add(hostname)
                 r7_map[hostname] = {
                     "vuln_total": _safe_int(r.get("vuln_total")),
                     "vuln_critical": _safe_int(r.get("critical")),
